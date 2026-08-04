@@ -14,6 +14,58 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// ===== OLLAMA PROXY ROUTES =====
+// Ollama's cloud API blocks direct calls from a browser (CORS). This
+// server has no such restriction, so the React app calls these routes
+// instead of hitting ollama.com directly, and the server forwards the
+// request with the API key attached.
+// Requires OLLAMA_API_KEY set in THIS server's .env (server/.env),
+// separate from the React .env — this key never reaches the browser.
+
+app.post('/api/ollama-chat', async (req, res) => {
+  const apiKey = process.env.OLLAMA_API_KEY;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'OLLAMA_API_KEY not set in server/.env' });
+  }
+  try {
+    const response = await fetch('https://ollama.com/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    console.error('Ollama chat proxy error:', err.message);
+    res.status(500).json({ error: 'Ollama chat proxy failed', details: err.message });
+  }
+});
+
+app.post('/api/ollama-search', async (req, res) => {
+  const apiKey = process.env.OLLAMA_API_KEY;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'OLLAMA_API_KEY not set in server/.env' });
+  }
+  try {
+    const response = await fetch('https://ollama.com/api/web_search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    console.error('Ollama search proxy error:', err.message);
+    res.status(500).json({ error: 'Ollama search proxy failed', details: err.message });
+  }
+});
+
 // Test route
 app.get('/', (req, res) => {
   res.json({ message: 'VoiceMatch API is running!' });
