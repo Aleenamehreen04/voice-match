@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   Briefcase, Mic, CheckCircle, Trophy, Sparkles,
-  Award, Star, TrendingUp, Clock
+  Award, Star, TrendingUp, Clock, ArrowUpRight
 } from 'lucide-react';
 
 const ActivityPanel = ({ user }) => {
@@ -46,16 +46,17 @@ const ActivityPanel = ({ user }) => {
   const earnedCount = achievements.filter(a => a.earned).length;
 
   const statusLabel = (app) => {
-    if (app.interview_completed && app.status === 'accepted') return { text: 'was accepted', color: 'text-green-600' };
-    if (app.interview_completed && app.status === 'rejected') return { text: 'completed the interview', color: 'text-slate-500' };
-    if (app.interview_completed) return { text: 'finished an AI interview', color: 'text-purple-600' };
-    return { text: 'applied', color: 'text-slate-500' };
+    if (app.interview_completed && app.status === 'accepted') return { text: 'was accepted', color: 'text-emerald-600 bg-emerald-50 border-emerald-200' };
+    if (app.interview_completed && app.status === 'rejected') return { text: 'completed the interview', color: 'text-slate-600 bg-slate-100 border-slate-200' };
+    if (app.interview_completed) return { text: 'finished an AI interview', color: 'text-purple-600 bg-purple-50 border-purple-200' };
+    return { text: 'applied', color: 'text-blue-600 bg-blue-50 border-blue-200' };
   };
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl p-12 text-center border border-slate-200/60">
-        <div className="animate-pulse text-slate-400">Loading your activity...</div>
+      <div className="bg-white/80 backdrop-blur-md rounded-2xl p-16 text-center border border-slate-200/80 shadow-sm">
+        <div className="inline-block w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <p className="text-slate-500 font-medium">Syncing your activity feed...</p>
       </div>
     );
   }
@@ -63,97 +64,128 @@ const ActivityPanel = ({ user }) => {
   return (
     <div className="space-y-6">
 
-      {/* Progress overview */}
+      {/* Progress overview cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-4 border border-slate-200/60 shadow-sm">
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-200 group">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Applications</p>
-              <p className="text-2xl font-bold text-slate-900">{totalApplications}</p>
+              <p className="text-xs font-semibold tracking-wider text-slate-400 uppercase">Applications</p>
+              <p className="text-3xl font-extrabold text-slate-900 mt-1">{totalApplications}</p>
             </div>
-            <Briefcase className="w-8 h-8 text-purple-200" />
+            <div className="w-12 h-12 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Briefcase className="w-6 h-6 text-purple-600" />
+            </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl p-4 border border-slate-200/60 shadow-sm">
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-200 group">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Interviews Done</p>
-              <p className="text-2xl font-bold text-slate-900">{interviewsCompleted}</p>
+              <p className="text-xs font-semibold tracking-wider text-slate-400 uppercase">Interviews Done</p>
+              <p className="text-3xl font-extrabold text-slate-900 mt-1">{interviewsCompleted}</p>
             </div>
-            <Mic className="w-8 h-8 text-purple-200" />
+            <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Mic className="w-6 h-6 text-indigo-600" />
+            </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl p-4 border border-slate-200/60 shadow-sm">
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-200 group">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Accepted</p>
-              <p className="text-2xl font-bold text-green-600">{accepted}</p>
+              <p className="text-xs font-semibold tracking-wider text-slate-400 uppercase">Accepted</p>
+              <p className="text-3xl font-extrabold text-emerald-600 mt-1">{accepted}</p>
             </div>
-            <CheckCircle className="w-8 h-8 text-green-200" />
+            <div className="w-12 h-12 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <CheckCircle className="w-6 h-6 text-emerald-600" />
+            </div>
           </div>
         </div>
-        <div className="bg-white rounded-xl p-4 border border-slate-200/60 shadow-sm">
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-200 group">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Points</p>
-              <p className="text-2xl font-bold text-yellow-600">{points}</p>
+              <p className="text-xs font-semibold tracking-wider text-slate-400 uppercase">Points</p>
+              <p className="text-3xl font-extrabold text-amber-600 mt-1">{points}</p>
             </div>
-            <Trophy className="w-8 h-8 text-yellow-200" />
+            <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Trophy className="w-6 h-6 text-amber-500" />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Achievements */}
-      <div className="bg-white rounded-xl border border-slate-200/60 shadow-sm p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-            <Award className="w-5 h-5 text-purple-600" /> Achievements
+      {/* Achievements section */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+        <div className="flex items-center justify-between mb-5 pb-3 border-b border-slate-100">
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+              <Award className="w-4 h-4" />
+            </div> 
+            Milestone Achievements
           </h3>
-          <span className="text-sm text-slate-500">{earnedCount} of {achievements.length}</span>
+          <span className="text-xs font-semibold px-3 py-1 bg-slate-100 text-slate-600 rounded-full">
+            {earnedCount} of {achievements.length} Unlocked
+          </span>
         </div>
-        <div className="grid sm:grid-cols-2 gap-3">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {achievements.map(a => (
             <div
               key={a.id}
-              className={`flex items-center gap-3 p-3 rounded-lg border ${
-                a.earned ? 'bg-purple-50 border-purple-200' : 'bg-slate-50 border-slate-200 opacity-50'
+              className={`flex items-center gap-3.5 p-3.5 rounded-xl border transition-all ${
+                a.earned 
+                  ? 'bg-gradient-to-br from-purple-50/60 to-white border-purple-200/80 shadow-xs' 
+                  : 'bg-slate-50/50 border-slate-200/60 opacity-60 grayscale-[30%]'
               }`}
             >
-              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${a.earned ? 'bg-purple-600' : 'bg-slate-300'}`}>
-                <a.icon className="w-4.5 h-4.5 text-white" />
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-xs ${
+                a.earned ? 'bg-purple-600 text-white' : 'bg-slate-200 text-slate-500'
+              }`}>
+                <a.icon className="w-5 h-5" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-800">{a.label}</p>
-                <p className="text-xs text-slate-500">{a.desc}</p>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900 truncate">{a.label}</p>
+                <p className="text-xs text-slate-500 truncate mt-0.5">{a.desc}</p>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Recent activity */}
-      <div className="bg-white rounded-xl border border-slate-200/60 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200/60">
-          <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-            <Clock className="w-5 h-5 text-purple-600" /> Recent Activity
+      {/* Recent activity timeline */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+              <Clock className="w-4 h-4" />
+            </div>
+            Recent Activity Feed
           </h3>
         </div>
         {applications.length === 0 ? (
-          <div className="p-10 text-center">
-            <Sparkles className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500 text-sm">No activity yet — apply to your first internship to get started!</p>
+          <div className="p-12 text-center">
+            <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3 text-slate-400">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <p className="text-slate-600 font-medium text-sm">No activity recorded yet</p>
+            <p className="text-slate-400 text-xs mt-1">Apply to your first internship to kickstart your journey!</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
             {applications.slice(0, 8).map(app => {
               const s = statusLabel(app);
               return (
-                <div key={app.id} className="px-6 py-3 flex items-center justify-between">
-                  <p className="text-sm text-slate-700">
-                    You <span className={`font-medium ${s.color}`}>{s.text}</span> for <strong>{app.gig_title || 'an internship'}</strong>
-                    {app.company ? ` at ${app.company}` : ''}
-                  </p>
-                  <span className="text-xs text-slate-400 flex-shrink-0 ml-4">
+                <div key={app.id} className="px-6 py-4 flex items-center justify-between hover:bg-slate-50/60 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${s.color}`}>
+                      {s.text}
+                    </span>
+                    <p className="text-sm text-slate-700">
+                      for <strong className="text-slate-900 font-semibold">{app.gig_title || 'an internship'}</strong>
+                      {app.company ? <span className="text-slate-500"> at {app.company}</span> : ''}
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-slate-400 flex-shrink-0 ml-4">
                     {new Date(app.applied_at).toLocaleDateString()}
                   </span>
                 </div>

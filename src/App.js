@@ -899,37 +899,137 @@ function App() {
       />
     );
   }
-
-  // ========== MAIN APP ==========
+// ========== MAIN APP ==========
   return (
     <div className={`min-h-screen ${currentPage === 'home' ? 'bg-slate-50' : 'bg-gradient-to-br from-purple-950 to-purple-900'}`}>
-      <nav className="bg-purple-900/50 backdrop-blur-sm border-b border-purple-700 p-4">
-        <div className="container mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-yellow-400">VoiceMatch 🎤</h1>
-          <div className="flex gap-4">
-            <button
-              onClick={async () => { await supabase.auth.signOut(); }}
-              className="text-white/70 hover:text-white px-3 py-1 rounded-lg text-sm transition"
-            >
-              Logout
-            </button>
-            <button onClick={() => setCurrentPage('home')} className={`px-4 py-2 rounded-lg ${currentPage === 'home' ? 'bg-yellow-400 text-purple-900' : 'text-white hover:bg-purple-800'}`}>Home</button>
-            <button onClick={() => setCurrentPage('dashboard')} className={`px-4 py-2 rounded-lg ${currentPage === 'dashboard' ? 'bg-yellow-400 text-purple-900' : 'text-white hover:bg-purple-800'}`}>Dashboard 📋</button>
-            
-            <button onClick={() => setCurrentPage('activity')} className={`px-4 py-2 rounded-lg ${currentPage === 'activity' ? 'bg-yellow-400 text-purple-900' : 'text-white hover:bg-purple-800'}`}>
-              Activity
-            </button>
+      {/* Enhanced Wow-Factor Navigation Bar */}
+      <nav className="sticky top-0 z-50 bg-purple-950/80 backdrop-blur-xl border-b border-purple-500/20 shadow-xl shadow-purple-950/20 px-4 lg:px-8 py-3.5 transition-all">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          
+          {/* Logo Section */}
+          <div 
+            onClick={() => setCurrentPage('home')}
+            className="flex items-center gap-3 cursor-pointer group"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-yellow-400 to-amber-300 flex items-center justify-center shadow-md shadow-yellow-500/20 group-hover:scale-105 transition-transform duration-300">
+              <span className="text-xl">🎤</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-lg font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-400 to-amber-200">
+                VoiceMatch
+              </span>
+              <span className="text-[10px] font-semibold text-purple-300/70 tracking-widest uppercase -mt-1">AI Career Hub</span>
+            </div>
+          </div>
 
-            <button onClick={() => setCurrentPage('saved')} className={`px-4 py-2 rounded-lg ${currentPage === 'saved' ? 'bg-yellow-400 text-purple-900' : 'text-white hover:bg-purple-800'}`}>Saved ❤️</button>
-            <button onClick={() => setCurrentPage('profile')} className={`px-4 py-2 rounded-lg ${currentPage === 'profile' ? 'bg-yellow-400 text-purple-900' : 'text-white hover:bg-purple-800'}`}>My Profile 👤</button>
-            <button onClick={openSkillExtractor} className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded-lg text-sm">🧠 Extract Skills</button>
-            <button onClick={openAdvisor} className="bg-purple-700 hover:bg-purple-800 text-white px-3 py-1 rounded-lg text-sm">🤖 Internship Advisor</button>
-            <button onClick={searchWebGigs} disabled={isAIThinking} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-sm disabled:opacity-50">
-              {isAIThinking ? '⏳ Searching...' : '🌐 Find Internships'}
+          {/* Center Navigation Links */}
+          <div className="hidden xl:flex items-center gap-1 bg-purple-900/40 p-1.5 rounded-2xl border border-purple-700/30 backdrop-blur-md shadow-inner">
+            <button 
+              onClick={() => setCurrentPage('home')} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
+                currentPage === 'home' 
+                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
+                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
+              }`}
+            >
+              <span>🏠</span> Home
+            </button>
+            <button 
+              onClick={() => setCurrentPage('dashboard')} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
+                currentPage === 'dashboard' 
+                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
+                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
+              }`}
+            >
+              <span>📋</span> Dashboard
+            </button>
+            <button 
+              onClick={() => setCurrentPage('activity')} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
+                currentPage === 'activity' 
+                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
+                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
+              }`}
+            >
+              <span>⚡</span> Activity
+            </button>
+            <button 
+              onClick={() => setCurrentPage('saved')} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
+                currentPage === 'saved' 
+                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
+                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
+              }`}
+            >
+              <span>❤️</span> Saved
+            </button>
+            <button 
+              onClick={() => setCurrentPage('profile')} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
+                currentPage === 'profile' 
+                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
+                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
+              }`}
+            >
+              <span>👤</span> Profile
             </button>
           </div>
+
+          {/* Action Hub & Profile Dropdown */}
+          <div className="flex items-center gap-2.5">
+            
+            {/* Action Buttons */}
+            <div className="hidden md:flex items-center gap-2">
+              <button 
+                onClick={openSkillExtractor} 
+                className="bg-purple-800/60 hover:bg-purple-700/80 text-purple-100 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold border border-purple-600/40 transition-all duration-200 flex items-center gap-1.5 shadow-xs"
+              >
+                <span>🧠</span> Extract Skills
+              </button>
+              <button 
+                onClick={openAdvisor} 
+                className="bg-purple-700/80 hover:bg-purple-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold border border-purple-500/40 transition-all duration-200 flex items-center gap-1.5 shadow-xs"
+              >
+                <span>🤖</span> Advisor
+              </button>
+              <button 
+                onClick={searchWebGigs} 
+                disabled={isAIThinking} 
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all duration-200 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <span>{isAIThinking ? '⏳' : '🌐'}</span> {isAIThinking ? 'Searching...' : 'Find Internships'}
+              </button>
+            </div>
+
+            {/* Divider */}
+            <div className="h-6 w-[1px] bg-purple-700/50 hidden md:block"></div>
+
+            {/* Logout Button */}
+            <button
+              onClick={async () => { await supabase.auth.signOut(); }}
+              className="bg-red-500/10 hover:bg-red-500/20 text-red-300 hover:text-red-200 px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/20 transition-all duration-200 flex items-center gap-1.5"
+              title="Sign Out"
+            >
+              <span>🚪</span> <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
+
+        </div>
+
+        {/* Mobile Sub-Navigation Bar Drawer Indicator */}
+        <div className="flex xl:hidden items-center justify-start gap-1.5 overflow-x-auto mt-3 pt-2.5 border-t border-purple-800/50 no-scrollbar">
+          <button onClick={() => setCurrentPage('home')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'home' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>🏠 Home</button>
+          <button onClick={() => setCurrentPage('dashboard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'dashboard' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>📋 Dashboard</button>
+          <button onClick={() => setCurrentPage('activity')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'activity' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>⚡ Activity</button>
+          <button onClick={() => setCurrentPage('saved')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'saved' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>❤️ Saved</button>
+          <button onClick={() => setCurrentPage('profile')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'profile' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>👤 Profile</button>
+          <button onClick={openSkillExtractor} className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap bg-purple-800 text-purple-100">🧠 Skills</button>
+          <button onClick={openAdvisor} className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap bg-purple-700 text-white">🤖 Advisor</button>
+          <button onClick={searchWebGigs} disabled={isAIThinking} className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap bg-blue-600 text-white">🌐 Find Internships</button>
         </div>
       </nav>
+
       <div className="container mx-auto p-6">
         {currentPage === 'home' && (
           <HomePage 
@@ -1186,8 +1286,7 @@ function App() {
       )}
     </div>
   );
-  };
-
+};
   // Floating Internship Advisor shortcut — visible on every page, including
   // the landing page, except while the Advisor itself is open or a mock
   // interview is actively in progress. Opens the EXISTING InternshipAdvisor

@@ -1,8 +1,8 @@
-// src/components/InterviewTimer.js
 import React, { useState, useEffect } from 'react';
 
 const InterviewTimer = ({ duration = 15, onTimeUp }) => {
-  const [timeLeft, setTimeLeft] = useState(duration * 60);
+  const totalSeconds = duration * 60;
+  const [timeLeft, setTimeLeft] = useState(totalSeconds);
   const [isActive, setIsActive] = useState(true);
 
   useEffect(() => {
@@ -22,21 +22,38 @@ const InterviewTimer = ({ duration = 15, onTimeUp }) => {
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
   const isWarning = timeLeft < 120;
+  const isCritical = timeLeft < 30;
+
+  const pct = timeLeft / totalSeconds;
+  const radius = 26;
+  const circumference = 2 * Math.PI * radius;
+  const dashoffset = circumference * (1 - pct);
+  const ringColor = isCritical ? '#dc2626' : isWarning ? '#f59e0b' : '#7c3aed';
 
   return (
     <div
-      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-lg font-bold shadow-sm ${
-        isWarning
-          ? 'bg-red-50 border-red-200 text-red-600 animate-pulse'
-          : 'bg-white border-slate-200 text-slate-800'
-      }`}
+      className={`inline-flex items-center gap-3 px-4 py-2 rounded-xl border shadow-sm ${
+        isWarning ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'
+      } ${isCritical ? 'animate-pulse' : ''}`}
     >
-      <span>⏱</span>
-      <span>
-        {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
-      </span>
+      <svg width="60" height="60" viewBox="0 0 60 60" className="flex-shrink-0">
+        <circle cx="30" cy="30" r={radius} fill="none" stroke="#e2e8f0" strokeWidth="5" />
+        <circle
+          cx="30" cy="30" r={radius} fill="none"
+          stroke={ringColor} strokeWidth="5" strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={dashoffset}
+          transform="rotate(-90 30 30)"
+          style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.3s' }}
+        />
+        <text x="30" y="34" textAnchor="middle" fontSize="12" fontWeight="700" fill={ringColor}>
+          {minutes}:{String(seconds).padStart(2, '0')}
+        </text>
+      </svg>
       {isWarning && (
-        <span className="text-sm font-medium">Time running out!</span>
+        <span className={`text-sm font-semibold ${isCritical ? 'text-red-600' : 'text-amber-600'}`}>
+          {isCritical ? 'Time almost up!' : 'Time running out!'}
+        </span>
       )}
     </div>
   );

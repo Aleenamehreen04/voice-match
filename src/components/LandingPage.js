@@ -17,6 +17,28 @@ import {
   Zap
 } from 'lucide-react';
 
+// Signature motif: an animated waveform. Ties every section back to the
+// "your voice is your resume" idea instead of relying on generic blobs.
+// Pure decoration — no state, no logic.
+const Waveform = ({ bars = 24, className = '', barClassName = 'bg-purple-400/70' }) => {
+  const heights = Array.from({ length: bars }, (_, i) => {
+    // deterministic pseudo-random pattern so it looks organic but is stable across renders
+    const seed = Math.sin(i * 12.9898) * 43758.5453;
+    return 20 + Math.abs(seed - Math.floor(seed)) * 80;
+  });
+  return (
+    <div className={`flex items-end gap-[3px] ${className}`} aria-hidden="true">
+      {heights.map((h, i) => (
+        <span
+          key={i}
+          className={`w-[3px] rounded-full ${barClassName} animate-wm-bar`}
+          style={{ height: `${h}%`, animationDelay: `${i * 0.045}s` }}
+        />
+      ))}
+    </div>
+  );
+};
+
 function LandingPage({ onStart }) {
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => {
@@ -33,16 +55,31 @@ function LandingPage({ onStart }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-purple-50/40 via-white to-slate-50/60">
-      
+    <div className="min-h-screen bg-gradient-to-b from-purple-50/40 via-white to-slate-50/60 font-[Inter,sans-serif]">
+
+      {/* Local styles: display font + waveform keyframes. Self-contained so
+          nothing outside this file needs to change. */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,500&display=swap');
+        .font-display { font-family: 'Fraunces', ui-serif, Georgia, serif; }
+        @keyframes wm-bar {
+          0%, 100% { transform: scaleY(0.4); opacity: 0.55; }
+          50% { transform: scaleY(1); opacity: 1; }
+        }
+        .animate-wm-bar { animation: wm-bar 1.6s ease-in-out infinite; transform-origin: bottom; }
+        @media (prefers-reduced-motion: reduce) {
+          .animate-wm-bar { animation: none; transform: scaleY(0.7); }
+        }
+      `}</style>
+
       {/* NAVBAR */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200/60">
+      <header className="sticky top-0 z-50 bg-white/75 backdrop-blur-xl border-b border-slate-200/60">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-purple-500 rounded-xl flex items-center justify-center">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-purple-500 rounded-xl flex items-center justify-center shadow-sm shadow-purple-300/50">
               <Mic className="w-4 h-4 text-white" />
             </div>
-            <span className="text-xl font-bold text-slate-900">VoiceMatch</span>
+            <span className="text-xl font-display font-semibold text-slate-900 tracking-tight">VoiceMatch</span>
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm">
             <a href="#features" className="text-slate-600 hover:text-slate-900 transition">Features</a>
@@ -51,7 +88,7 @@ function LandingPage({ onStart }) {
           </div>
           <button 
             onClick={onStart}
-            className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2"
+            className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-xl text-sm font-medium transition-all hover:shadow-lg hover:shadow-slate-300/50 flex items-center gap-2"
           >
             Get Started <ArrowRight className="w-4 h-4" />
           </button>
@@ -65,24 +102,24 @@ function LandingPage({ onStart }) {
         <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-purple-400/20 rounded-full blur-3xl" />
         <div className="absolute top-1/3 left-1/2 w-72 h-72 bg-purple-200/20 rounded-full blur-3xl -translate-x-1/2" />
 
-        <div className="max-w-7xl mx-auto px-6 pt-12 pb-16 relative">
+        <div className="max-w-7xl mx-auto px-6 pt-14 pb-16 relative">
           <div className="flex flex-col lg:flex-row items-center gap-16">
             
             {/* Hero Content */}
             <div className="flex-1 text-center lg:text-left">
-              <div className="inline-flex items-center gap-2 bg-purple-50 border border-purple-200/60 rounded-full px-4 py-1.5 mb-4">
+              <div className="inline-flex items-center gap-2 bg-purple-50 border border-purple-200/60 rounded-full px-4 py-1.5 mb-5">
                 <Sparkles className="w-4 h-4 text-purple-600" />
                 <span className="text-sm font-medium text-purple-700">AI-Powered Internship Prep</span>
               </div>
               
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-slate-900 leading-tight mb-4">
+              <h1 className="font-display text-5xl md:text-6xl lg:text-7xl font-medium text-slate-900 leading-[1.05] mb-5 tracking-tight">
                 Your Voice Is
-                <span className="block bg-gradient-to-r from-purple-600 to-purple-400 bg-clip-text text-transparent">
+                <span className="block italic bg-gradient-to-r from-purple-600 to-purple-400 bg-clip-text text-transparent">
                   Your Resume
                 </span>
               </h1>
               
-              <p className="text-lg text-slate-600 max-w-2xl mx-auto lg:mx-0 leading-relaxed mb-6">
+              <p className="text-lg text-slate-600 max-w-2xl mx-auto lg:mx-0 leading-relaxed mb-8">
                 Speak your skills, get matched to real internships, and walk in prepared —
                 with AI mock interviews built for exactly the role you're going for.
               </p>
@@ -90,46 +127,49 @@ function LandingPage({ onStart }) {
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
                 <button 
                   onClick={onStart}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3.5 rounded-2xl font-medium text-base transition shadow-lg shadow-purple-200 flex items-center justify-center gap-3"
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3.5 rounded-2xl font-medium text-base transition-all shadow-lg shadow-purple-300/40 hover:shadow-xl hover:shadow-purple-300/50 hover:-translate-y-0.5 flex items-center justify-center gap-3"
                 >
                   <Mic className="w-5 h-5" /> Start Voice Interview
                 </button>
                 <button 
                   onClick={() => document.getElementById('how-it-works').scrollIntoView({ behavior: 'smooth' })}
-                  className="border-2 border-slate-200 hover:border-purple-300 text-slate-700 px-8 py-3.5 rounded-2xl font-medium text-base transition flex items-center justify-center gap-3"
+                  className="border-2 border-slate-200 hover:border-purple-300 text-slate-700 px-8 py-3.5 rounded-2xl font-medium text-base transition-all hover:bg-purple-50/50 flex items-center justify-center gap-3"
                 >
                   <Play className="w-5 h-5" /> See How It Works
                 </button>
               </div>
               
-              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-8 mt-8 pt-6 border-t border-slate-200/60">
+              <div className="flex flex-wrap items-center justify-center lg:justify-start gap-8 mt-9 pt-6 border-t border-slate-200/60">
                 <div className="flex items-center gap-3">
                   <Users className="w-5 h-5 text-purple-600" />
-                  <span className="text-sm text-slate-600"><span className="font-bold text-slate-900">500+</span> Students</span>
+                  <span className="text-sm text-slate-600"><span className="font-display font-semibold text-slate-900">500+</span> Students</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <Building2 className="w-5 h-5 text-purple-600" />
-                  <span className="text-sm text-slate-600"><span className="font-bold text-slate-900">50+</span> Startups</span>
+                  <span className="text-sm text-slate-600"><span className="font-display font-semibold text-slate-900">50+</span> Startups</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <TrendingUp className="w-5 h-5 text-purple-600" />
-                  <span className="text-sm text-slate-600"><span className="font-bold text-slate-900">95%</span> Match Rate</span>
+                  <span className="text-sm text-slate-600"><span className="font-display font-semibold text-slate-900">95%</span> Match Rate</span>
                 </div>
               </div>
             </div>
 
-            {/* Hero Illustration — animated mic with pulse rings + live skill chips */}
+            {/* Hero Illustration — animated mic with waveform signature + live skill chips */}
             <div className="flex-1 flex justify-center lg:justify-end">
               <div className="relative w-full max-w-md">
-                <div className="aspect-square bg-gradient-to-br from-purple-100 to-purple-50 rounded-3xl p-8 flex items-center justify-center border border-purple-200/30 shadow-xl shadow-purple-100/50">
-                  <div className="text-center relative">
-                    <div className="relative w-24 h-24 mx-auto mb-6">
+                <div className="aspect-square bg-gradient-to-br from-purple-100 to-purple-50 rounded-[2.5rem] p-8 flex items-center justify-center border border-purple-200/40 shadow-2xl shadow-purple-200/40">
+                  <div className="text-center relative w-full">
+                    <div className="relative w-24 h-24 mx-auto mb-5">
                       <div className="absolute inset-0 rounded-3xl bg-purple-400/30 animate-ping" />
                       <div className="absolute inset-[-10px] rounded-3xl bg-purple-300/20 animate-pulse" />
-                      <div className="relative w-24 h-24 bg-gradient-to-br from-purple-600 to-purple-500 rounded-3xl flex items-center justify-center shadow-xl shadow-purple-200">
+                      <div className="relative w-24 h-24 bg-gradient-to-br from-purple-600 to-purple-500 rounded-3xl flex items-center justify-center shadow-xl shadow-purple-300/50">
                         <Mic className="w-12 h-12 text-white" />
                       </div>
                     </div>
+
+                    <Waveform bars={28} className="h-10 justify-center mb-5" />
+
                     <p className="text-slate-700 font-medium text-lg">"I know React, Python, and Figma"</p>
                     <p className="text-slate-400 text-sm mt-2">AI extracts your skills in real-time</p>
                     <div className="mt-6 flex flex-wrap gap-2 justify-center">
@@ -153,10 +193,10 @@ function LandingPage({ onStart }) {
             {coreFeatures.map((feature, index) => (
               <div
                 key={index}
-                className="group bg-gradient-to-br from-purple-50/80 to-white hover:from-purple-100/80 rounded-2xl p-6 border border-purple-100 hover:border-purple-300 transition-all hover:shadow-md hover:-translate-y-0.5 animate-on-scroll opacity-0 translate-y-8"
+                className="group bg-gradient-to-br from-purple-50/80 to-white hover:from-purple-100/80 rounded-2xl p-6 border border-purple-100 hover:border-purple-300 transition-all hover:shadow-lg hover:shadow-purple-100/60 hover:-translate-y-1 animate-on-scroll opacity-0 translate-y-8"
                 style={{ transitionDelay: `${index * 80}ms` }}
               >
-                <div className="w-11 h-11 bg-purple-600 rounded-xl flex items-center justify-center mb-4 shadow-sm shadow-purple-200 group-hover:scale-105 transition-transform">
+                <div className="w-11 h-11 bg-purple-600 rounded-xl flex items-center justify-center mb-4 shadow-sm shadow-purple-300/50 group-hover:scale-110 transition-transform">
                   <feature.icon className="w-5 h-5 text-white" />
                 </div>
                 <h3 className="text-sm font-semibold text-slate-900 mb-1.5 leading-tight">{feature.title}</h3>
@@ -168,10 +208,11 @@ function LandingPage({ onStart }) {
       </section>
 
       {/* FEATURES */}
-      <section id="features" className="py-24 bg-slate-50/50">
+      <section id="features" className="py-24 bg-slate-50/50 relative">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-2xl mx-auto mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
+            <span className="text-xs font-semibold tracking-[0.2em] text-purple-600 uppercase">What's Inside</span>
+            <h2 className="font-display text-3xl md:text-4xl font-medium text-slate-900 mt-3 mb-4 tracking-tight">
               Everything You Need to Land Your First Internship
             </h2>
             <p className="text-lg text-slate-600">
@@ -183,7 +224,7 @@ function LandingPage({ onStart }) {
             {features.map((feature, index) => (
               <div 
                 key={index} 
-                className="group bg-white hover:bg-purple-50/40 rounded-2xl p-8 border border-slate-200/60 hover:border-purple-200 transition-all hover:shadow-lg hover:shadow-purple-50/50 animate-on-scroll opacity-0 translate-y-8"
+                className="group bg-white hover:bg-purple-50/40 rounded-2xl p-8 border border-slate-200/60 hover:border-purple-200 transition-all hover:shadow-xl hover:shadow-purple-100/60 hover:-translate-y-1 animate-on-scroll opacity-0 translate-y-8"
                 style={{ transitionDelay: `${index * 100}ms` }}
               >
                 <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-4 group-hover:bg-purple-100 transition">
@@ -198,10 +239,12 @@ function LandingPage({ onStart }) {
       </section>
 
       {/* HOW IT WORKS */}
-      <section id="how-it-works" className="py-24 bg-white">
+      <section id="how-it-works" className="py-24 bg-white relative overflow-hidden">
+        <Waveform bars={60} className="absolute top-0 left-0 right-0 h-8 px-6 opacity-30" barClassName="bg-purple-300" />
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-2xl mx-auto mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
+            <span className="text-xs font-semibold tracking-[0.2em] text-purple-600 uppercase">The Flow</span>
+            <h2 className="font-display text-3xl md:text-4xl font-medium text-slate-900 mt-3 mb-4 tracking-tight">
               How VoiceMatch Works
             </h2>
             <p className="text-lg text-slate-600">
@@ -213,10 +256,10 @@ function LandingPage({ onStart }) {
             {steps.map((step, index) => (
               <div 
                 key={index} 
-                className="relative bg-slate-50/60 rounded-2xl p-8 border border-slate-200/60 hover:border-purple-200 transition-all hover:shadow-md animate-on-scroll opacity-0 translate-y-8"
+                className="relative bg-slate-50/60 rounded-2xl p-8 border border-slate-200/60 hover:border-purple-200 transition-all hover:shadow-lg hover:shadow-purple-100/40 animate-on-scroll opacity-0 translate-y-8"
                 style={{ transitionDelay: `${index * 100}ms` }}
               >
-                <div className="absolute -top-3 -left-3 w-8 h-8 bg-purple-600 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-sm">
+                <div className="absolute -top-3 -left-3 w-8 h-8 bg-purple-600 rounded-xl flex items-center justify-center text-white text-sm font-display font-semibold shadow-md shadow-purple-300/50">
                   {index + 1}
                 </div>
                 <div className="mt-4">
@@ -233,7 +276,7 @@ function LandingPage({ onStart }) {
           <div className="text-center mt-12">
             <button 
               onClick={onStart}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-4 rounded-2xl font-medium transition inline-flex items-center gap-2 shadow-lg shadow-purple-200"
+              className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-4 rounded-2xl font-medium transition-all inline-flex items-center gap-2 shadow-lg shadow-purple-300/40 hover:shadow-xl hover:-translate-y-0.5"
             >
               Start Your Journey <ArrowRight className="w-4 h-4" />
             </button>
@@ -246,19 +289,19 @@ function LandingPage({ onStart }) {
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
             <div className="animate-on-scroll opacity-0 translate-y-8">
-              <div className="text-4xl font-bold text-slate-900">500+</div>
+              <div className="font-display text-4xl font-medium text-slate-900">500+</div>
               <div className="text-sm text-slate-500 mt-1">Active Students</div>
             </div>
             <div className="animate-on-scroll opacity-0 translate-y-8" style={{ transitionDelay: '100ms' }}>
-              <div className="text-4xl font-bold text-slate-900">50+</div>
+              <div className="font-display text-4xl font-medium text-slate-900">50+</div>
               <div className="text-sm text-slate-500 mt-1">Partner Startups</div>
             </div>
             <div className="animate-on-scroll opacity-0 translate-y-8" style={{ transitionDelay: '200ms' }}>
-              <div className="text-4xl font-bold text-slate-900">95%</div>
+              <div className="font-display text-4xl font-medium text-slate-900">95%</div>
               <div className="text-sm text-slate-500 mt-1">Match Accuracy</div>
             </div>
             <div className="animate-on-scroll opacity-0 translate-y-8" style={{ transitionDelay: '300ms' }}>
-              <div className="text-4xl font-bold text-slate-900">4.8★</div>
+              <div className="font-display text-4xl font-medium text-slate-900">4.8★</div>
               <div className="text-sm text-slate-500 mt-1">Average Rating</div>
             </div>
           </div>
@@ -269,7 +312,8 @@ function LandingPage({ onStart }) {
       <section id="testimonials" className="py-24 bg-slate-50/50">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-2xl mx-auto mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
+            <span className="text-xs font-semibold tracking-[0.2em] text-purple-600 uppercase">Proof</span>
+            <h2 className="font-display text-3xl md:text-4xl font-medium text-slate-900 mt-3 mb-4 tracking-tight">
               What Students Say
             </h2>
             <p className="text-lg text-slate-600">
@@ -281,7 +325,7 @@ function LandingPage({ onStart }) {
             {testimonials.map((testimonial, index) => (
               <div 
                 key={index} 
-                className="bg-white rounded-2xl p-8 border border-slate-200/60 hover:border-purple-200 transition-all hover:shadow-md animate-on-scroll opacity-0 translate-y-8"
+                className="bg-white rounded-2xl p-8 border border-slate-200/60 hover:border-purple-200 transition-all hover:shadow-lg hover:shadow-purple-100/50 hover:-translate-y-1 animate-on-scroll opacity-0 translate-y-8"
                 style={{ transitionDelay: `${index * 100}ms` }}
               >
                 <div className="flex items-center gap-1 text-yellow-400 mb-4">
@@ -291,8 +335,8 @@ function LandingPage({ onStart }) {
                 </div>
                 <p className="text-slate-600 text-sm leading-relaxed mb-4">"{testimonial.quote}"</p>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-purple-100 to-purple-50 rounded-full flex items-center justify-center">
-                    <span className="text-purple-600 font-semibold text-sm">{testimonial.name[0]}</span>
+                  <div className="w-10 h-10 bg-gradient-to-br from-purple-100 to-purple-50 rounded-full flex items-center justify-center border border-purple-200/40">
+                    <span className="font-display text-purple-600 font-semibold text-sm">{testimonial.name[0]}</span>
                   </div>
                   <div>
                     <div className="text-sm font-semibold text-slate-900">{testimonial.name}</div>
@@ -308,10 +352,11 @@ function LandingPage({ onStart }) {
       {/* CTA */}
       <section className="py-24 bg-white">
         <div className="max-w-4xl mx-auto px-6">
-          <div className="bg-gradient-to-br from-purple-900 via-slate-900 to-slate-800 rounded-3xl p-12 text-center relative overflow-hidden">
+          <div className="bg-gradient-to-br from-purple-900 via-slate-900 to-slate-800 rounded-[2.5rem] p-12 text-center relative overflow-hidden">
             <div className="absolute -top-20 -right-20 w-60 h-60 bg-purple-500/20 rounded-full blur-3xl" />
+            <Waveform bars={36} className="absolute bottom-6 left-1/2 -translate-x-1/2 h-6 opacity-40 justify-center" barClassName="bg-purple-300" />
             <Rocket className="w-12 h-12 text-purple-400 mx-auto mb-4 relative" />
-            <h2 className="text-3xl md:text-4xl font-bold text-white mb-4 relative">
+            <h2 className="font-display text-3xl md:text-4xl font-medium text-white mb-4 relative tracking-tight">
               Ready to Find Your Dream Internship?
             </h2>
             <p className="text-slate-300 max-w-xl mx-auto mb-8 relative">
@@ -319,7 +364,7 @@ function LandingPage({ onStart }) {
             </p>
             <button 
               onClick={onStart}
-              className="bg-white hover:bg-slate-100 text-slate-900 px-10 py-4 rounded-2xl font-medium text-lg transition inline-flex items-center gap-2 relative"
+              className="bg-white hover:bg-slate-100 text-slate-900 px-10 py-4 rounded-2xl font-medium text-lg transition-all inline-flex items-center gap-2 relative hover:shadow-xl hover:-translate-y-0.5"
             >
               <Mic className="w-5 h-5" /> Get Started Now
             </button>
@@ -335,7 +380,7 @@ function LandingPage({ onStart }) {
             <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-purple-500 rounded-xl flex items-center justify-center">
               <Mic className="w-4 h-4 text-white" />
             </div>
-            <span className="text-sm font-semibold text-slate-900">VoiceMatch</span>
+            <span className="text-sm font-display font-semibold text-slate-900">VoiceMatch</span>
           </div>
           <p className="text-sm text-slate-500">© 2026 VoiceMatch. All rights reserved.</p>
           <div className="flex items-center gap-4 text-sm text-slate-500">
@@ -349,12 +394,8 @@ function LandingPage({ onStart }) {
   );
 }
 
-// ===== DATA =====
+// ===== DATA (unchanged — same content, same shape, same order) =====
 
-// The 4 highlight cards shown right under the hero. Named for what the app
-// actually does (voice-based skill extraction, not resume parsing — there's
-// no resume upload/analysis feature) so the landing page doesn't promise
-// something the product doesn't do.
 const coreFeatures = [
   { icon: Mic, title: "Voice Skill Extraction", description: "Speak naturally — AI pulls out your real skills." },
   { icon: Zap, title: "AI Mock Interviews", description: "Practice role-specific interviews before you apply." },
