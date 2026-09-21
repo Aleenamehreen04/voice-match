@@ -16,7 +16,7 @@ const DIFFICULTY_STYLES = {
   hard: 'bg-red-50 text-red-700 border-red-200'
 };
 
-const InterviewRoom = ({ application, onComplete }) => {
+const InterviewRoom = ({ application, domain, onComplete }) => {
   const [questions, setQuestions] = useState([]);
   const [questionSource, setQuestionSource] = useState(null);
   const [loadingQuestions, setLoadingQuestions] = useState(true);
@@ -42,7 +42,7 @@ const InterviewRoom = ({ application, onComplete }) => {
   useEffect(() => {
     const loadQuestions = async () => {
       setLoadingQuestions(true);
-      const result = await generateMCQInterview(gig);
+      const result = await generateMCQInterview(gig, domain);
       setQuestions(result.questions);
       setQuestionSource(result.source);
       setLoadingQuestions(false);

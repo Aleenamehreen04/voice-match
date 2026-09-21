@@ -16,7 +16,15 @@ export const SKILLS_LIST = [
   "Content Writing", "Social Media", "SEO", "Graphic Design", "Photoshop",
   "Video Editing", "Business", "Presentations", "Research", "Communication",
   "Leadership", "Problem Solving", "Web Development", "App Development",
-  "Flutter", "Firebase", "MongoDB", "Git"
+  "Flutter", "Firebase", "MongoDB", "Git",
+  // AI/ML
+  "Artificial Intelligence", "Deep Learning", "TensorFlow", "PyTorch", "NLP",
+  "Computer Vision", "Neural Networks", "Data Science", "Keras", "OpenCV",
+  "Scikit-learn", "Generative AI", "LLM",
+  // Cloud
+  "AWS", "Azure", "Google Cloud", "Docker", "Kubernetes", "DevOps", "Cloud Computing",
+  // Cybersecurity
+  "Cybersecurity", "Network Security", "Penetration Testing", "Ethical Hacking", "Cryptography"
 ];
 
 const keywordExtractSkills = (text) => {
@@ -127,28 +135,13 @@ export const extractSkillsHybrid = async (transcript) => {
 };
 
 // ============================================================
-// 2. SEARCH REAL INTERNSHIPS (Serper)
+// 2. SEARCH REAL INTERNSHIPS (SerpApi — Google Jobs engine)
 // ============================================================
-// Tries to find a real stipend figure inside the search result's own
-// title/snippet text (e.g. "₹15,000/month" or "15000 per month"). Only
+// Duration usually isn't a separate structured field from Google Jobs,
+// so we still look for it inside the real job description text. Only
 // falls back to a randomized plausible estimate if nothing real is
 // found — and that estimate is honestly labeled "Est." rather than
 // pretending to be a real number pulled from the listing.
-const extractStipend = (text) => {
-  const rupeeMatch = text.match(/₹\s?[\d,]{4,7}/);
-  if (rupeeMatch) {
-    const clean = rupeeMatch[0].replace(/\s/g, '');
-    return `${clean}/month`;
-  }
-  const numberMatch = text.match(/[\d,]{4,6}\s?(?:per month|\/month|a month|INR)/i);
-  if (numberMatch) return `₹${numberMatch[0]}`.replace(/\s?(?:per month|\/month|a month|INR)/i, '/month');
-
-  // Nothing found in the real text — estimate within a realistic
-  // beginner-internship range for India, clearly labeled as an estimate.
-  const estimate = Math.floor(Math.random() * 18 + 8) * 1000; // ₹8,000–₹25,000
-  return `Est. ₹${estimate.toLocaleString('en-IN')}/month`;
-};
-
 const extractDuration = (text) => {
   const match = text.match(/\d+\s?(?:-\s?\d+\s?)?(?:months?|weeks?)/i);
   if (match) return match[0];
@@ -156,12 +149,12 @@ const extractDuration = (text) => {
   return `Est. ${options[Math.floor(Math.random() * options.length)]}`;
 };
 
-// NEW: replaces the old hardcoded difficulty:'Not specified'. Looks for
-// real signal words in the title/snippet first (senior/lead/advanced vs
-// fresher/entry-level/beginner). If nothing matches, estimates from the
-// stipend figure as a rough proxy (higher stipend tends to mean more
-// experience expected), and only falls back to 'Medium' as a last resort
-// — never leaves the field blank or unlabeled again.
+// Looks for real signal words in the title/description first
+// (senior/lead/advanced vs fresher/entry-level/beginner). If nothing
+// matches, estimates from the stipend figure as a rough proxy (higher
+// stipend tends to mean more experience expected), and only falls back
+// to 'Medium' as a last resort — never leaves the field blank or
+// unlabeled.
 const extractDifficulty = (text, stipendText) => {
   const lower = (text || '').toLowerCase();
 
@@ -171,8 +164,8 @@ const extractDifficulty = (text, stipendText) => {
   if (hardSignals.some(sig => lower.includes(sig))) return 'Hard';
   if (easySignals.some(sig => lower.includes(sig))) return 'Easy';
 
-  // Fall back to a rough proxy from stipend, if we have a real (non-estimated) one
-  if (stipendText && !stipendText.startsWith('Est.')) {
+  // Fall back to a rough proxy from stipend, only if we have a real one
+  if (stipendText && stipendText !== 'Stipend not listed') {
     const numeric = parseInt(stipendText.replace(/[^\d]/g, ''), 10);
     if (!isNaN(numeric)) {
       if (numeric >= 20000) return 'Hard';
@@ -183,79 +176,75 @@ const extractDifficulty = (text, stipendText) => {
   return 'Medium';
 };
 
-const webResultToGig = (result, i, skills, category) => {
-  let company = 'See listing';
-  try {
-    const host = new URL(result.link).hostname.replace('www.', '');
-    company = host.split('.')[0];
-    company = company.charAt(0).toUpperCase() + company.slice(1);
-  } catch (e) {
-    // Previously silent — now logged so we can see exactly which
-    // results are failing to parse and why (missing/malformed link).
-    console.warn('Could not parse company from result.link:', result?.link, e.message);
-  }
+// Real, honest match score based on how many of the user's extracted
+// skills actually appear in the job's title/description — replaces the
+// old hardcoded matchScore: 78 that every Serper result used to get
+// regardless of fit. Same scoring shape as the hardcoded-gigs fallback
+// in App.js, so scores are comparable across all three gig sources.
+const scoreJobAgainstSkills = (text, skills) => {
+  if (!skills || skills.length === 0) return 50;
+  const lower = (text || '').toLowerCase();
+  const matchCount = skills.filter(s => lower.includes(s.toLowerCase())).length;
+  return Math.min(15 + matchCount * 25, 95);
+};
 
-  const combinedText = `${result.title || ''} ${result.snippet || ''}`;
-  const stipend = extractStipend(combinedText);
+const jobResultToGig = (job, i, skills, category) => {
+  const description = job.description || '';
+  const combinedText = `${job.title || ''} ${description}`;
+
+  // Real salary field when Google Jobs provides one; otherwise we say
+  // so honestly instead of guessing a number that isn't really there.
+  const stipend = job.detected_extensions?.salary || 'Stipend not listed';
+
+  // apply_options is a list of real job-board application links.
+  // Take the first one; fall back gracefully if it's ever missing.
+  const applyUrl = job.apply_options?.[0]?.link || job.share_link || '';
 
   return {
-    id: `web-${Date.now()}-${i}`,
-    title: result.title || 'Internship Opportunity',
-    company,
+    id: `serpapi-${Date.now()}-${i}`,
+    title: job.title || 'Internship Opportunity',
+    company: job.company_name || 'See listing',
     stipend,
     duration: extractDuration(combinedText),
     category: category || 'General',
     difficulty: extractDifficulty(combinedText, stipend),
     skills: skills?.length > 0 ? skills : [],
-    description: (result.snippet || '').slice(0, 220),
-    location: 'India',
-    url: result.link,
-    matchScore: 78,
+    description: description.slice(0, 220),
+    location: job.location || 'India',
+    url: applyUrl,
+    matchScore: scoreJobAgainstSkills(combinedText, skills),
     showIdealBadge: false
   };
 };
 
 export const searchInternshipsWithAI = async (skills = [], category = '') => {
-  // Removed the Vite-only `import.meta.env` fallback — Create React App
-  // can choke on `import.meta` syntax at build/parse time, which could
-  // silently break this whole function. REACT_APP_ vars are the correct
-  // (and only) source in a CRA project.
-  const SERPER_KEY = process.env.REACT_APP_SERPER_API_KEY || '';
-
-  if (!SERPER_KEY) {
-    console.warn('Serper API key is missing');
-    return [];
-  }
-
   try {
     const skillText = skills.length > 0 ? skills.join(' ') : 'software';
-    const searchQuery = `${skillText} internship India ${category || ''} (site:internshala.com OR site:linkedin.com/jobs OR site:wellfound.com)`.trim();
+    const searchQuery = `${skillText} internship ${category || ''}`.trim();
 
-    const response = await fetch('https://google.serper.dev/search', {
-      method: 'POST',
-      headers: {
-        'X-API-KEY': SERPER_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        q: searchQuery,
-        num: 10
-      })
-    });
+    // SerpApi blocks direct browser calls (CORS), so we go through our
+    // own server proxy instead of serpapi.com directly — same pattern
+    // as the Ollama routes in server/index.js.
+    const response = await fetch(
+      `http://localhost:5000/api/serpapi-jobs?q=${encodeURIComponent(searchQuery)}`
+    );
 
     if (!response.ok) {
-      console.warn('Serper error:', response.status);
+      console.warn('SerpApi proxy error:', response.status);
       return [];
     }
 
     const data = await response.json();
-    const results = data.organic || [];
 
-    console.log('Serper results:', results); // temporary — remove once confirmed working
+    if (data.error) {
+      console.warn('SerpApi returned an error:', data.error);
+      return [];
+    }
 
+    const results = data.jobs_results || [];
     if (results.length === 0) return [];
 
-    return results.slice(0, 8).map((r, i) => webResultToGig(r, i, skills, category));
+    return results.slice(0, 10).map((job, i) => jobResultToGig(job, i, skills, category));
   } catch (err) {
     console.warn('Internship search failed:', err.message);
     return [];
@@ -440,9 +429,9 @@ export const evaluateInterview = async (transcript) => {
 // ============================================================
 const GROQ_API_KEY = process.env.REACT_APP_GROQ_API_KEY || '';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODEL = 'openai/gpt-oss-120b'; // llama-3.3-70b-versatile was deprecated/shut down by Groq on 2026-08-16
 
-const callGroq = async (messages, maxTokens = 900, temperature = 0.5) => {
+export const callGroq = async (messages, maxTokens = 900, temperature = 0.5) => {
   if (!GROQ_API_KEY) {
     console.warn('No Groq API key set (REACT_APP_GROQ_API_KEY).');
     return null;
@@ -458,7 +447,14 @@ const callGroq = async (messages, maxTokens = 900, temperature = 0.5) => {
         model: GROQ_MODEL,
         messages,
         temperature,
-        max_tokens: maxTokens
+        // gpt-oss models always spend some tokens "thinking" before
+        // answering (can't be turned off) — 'low' keeps that spend
+        // small so more of max_tokens is left for the actual answer.
+        reasoning_effort: 'low',
+        // Bumped from the old 900 default: gpt-oss's reasoning tokens
+        // count against this budget, so the old value was cutting real
+        // answers off mid-JSON. 131k context window means this is cheap.
+        max_tokens: Math.max(maxTokens, 2000)
       })
     });
     if (!response.ok) {
@@ -510,13 +506,19 @@ const FALLBACK_MCQS = [
   }
 ];
 
-export const generateMCQInterview = async (gig) => {
+export const generateMCQInterview = async (gig, domain = null) => {
+  // If the student explicitly picked a domain (via the domain selector),
+  // it takes priority over whatever skills happened to get keyword-matched
+  // onto this specific gig — those can be too generic/thin to reliably
+  // signal "this should be an AI/ML interview" on their own.
+  const focus = domain || gig?.skills?.join(', ') || 'general skills';
+
   const content = await callGroq([
     {
       role: 'system',
-      content: `You write TECHNICAL, role-specific multiple-choice interview questions for a "${gig?.title || 'internship'}" role at ${gig?.company || 'a company'}, requiring these exact skills: ${gig?.skills?.join(', ') || 'general skills'}.
+      content: `You write TECHNICAL, role-specific multiple-choice interview questions for a "${gig?.title || 'internship'}" role at ${gig?.company || 'a company'}. The interview MUST focus specifically on the domain: ${focus}.
 
-Generate exactly 5 questions that directly test knowledge of THOSE SPECIFIC SKILLS — concepts, syntax, tools, or practical scenarios someone would only know if they'd actually worked with ${gig?.skills?.join(', ') || 'these skills'}. Do NOT write generic workplace/soft-skill questions like "how do you handle deadlines" — every question must require real knowledge of the listed skills to answer correctly.
+Generate exactly 5 questions that directly test real knowledge of ${focus} — concepts, syntax, tools, or practical scenarios someone would only know if they'd actually worked in ${focus}. Do NOT write generic workplace/soft-skill questions like "how do you handle deadlines" — every question must require real knowledge of ${focus} to answer correctly. Do NOT drift into unrelated domains even if the role title suggests something broader.
 
 Mix difficulty: 1 easy (basic definition/concept), 2 medium (practical application), 2 hard (deeper/tricky concept or common mistake). Each question needs exactly 4 options with only one clearly correct answer — wrong options should be plausible, not obviously silly.
 
@@ -524,7 +526,7 @@ Return ONLY JSON in this exact shape: {"questions":[{"question":"...","options":
     },
     {
       role: 'user',
-      content: `Generate the 5 MCQ interview questions now.`
+      content: `Generate the 5 MCQ interview questions now, focused on ${focus}.`
     }
   ], 900, 0.5);
 

@@ -6,6 +6,7 @@ import InternshipAdvisor from './components/InternshipAdvisor';
 import StudentDashboard from './components/StudentDashboard';
 import SkillProfilePage from './components/SkillProfilePage';
 import InterviewRoom from './components/InterviewRoom';
+import DomainSelector from './components/DomainSelector';
 import { HARDCODED_GIGS } from './components/hardcodedGigs';
 import LandingPage from './components/LandingPage';
 import HomePage from './components/HomePage';
@@ -16,7 +17,7 @@ import ResetMyData from './components/ResetMyData';
 import { getApplicationUrl } from './utils/applyLink';
 
 // ========== SKILLS LIST ==========
-const SKILLS_LIST = ["React", "JavaScript", "Python", "UI Design", "Figma", "CSS", "HTML", "Node.js", "Java", "C++", "Machine Learning", "Data Analysis", "SQL", "Marketing", "Content Writing", "Social Media", "SEO", "Graphic Design", "Photoshop", "Video Editing", "Business", "Presentations", "Research", "Communication", "Leadership", "Problem Solving", "Web Development", "App Development", "Flutter", "Firebase", "MongoDB", "Git"];
+const SKILLS_LIST = ["React", "JavaScript", "Python", "UI Design", "Figma", "CSS", "HTML", "Node.js", "Java", "C++", "Machine Learning", "Data Analysis", "SQL", "Marketing", "Content Writing", "Social Media", "SEO", "Graphic Design", "Photoshop", "Video Editing", "Business", "Presentations", "Research", "Communication", "Leadership", "Problem Solving", "Web Development", "App Development", "Flutter", "Firebase", "MongoDB", "Git", "Artificial Intelligence", "Deep Learning", "TensorFlow", "PyTorch", "NLP", "Computer Vision", "Neural Networks", "Data Science", "Keras", "OpenCV", "Scikit-learn", "Generative AI", "LLM", "AWS", "Azure", "Google Cloud", "Docker", "Kubernetes", "DevOps", "Cloud Computing", "Cybersecurity", "Network Security", "Penetration Testing", "Ethical Hacking", "Cryptography"];
 
 // Module-level skill extractor
 const extractSkillsFromText = (text) => {
@@ -30,9 +31,9 @@ const VOICE_QUESTIONS = [
   "Tell me about a project or skill that you're most confident in.",
   "What kind of internship are you looking for?"
 ];
+// Stipend and hours-per-week questions removed: live internship results
+// rarely include that data, so asking about it did not improve matching.
 const EXTRA_QUESTIONS = [
-  { id: "voiceStipend", question: "What is your preferred monthly stipend? (e.g. 10000 or 15000)", type: "text" },
-  { id: "hoursPerWeek", question: "How many hours per week would you like to work?", type: "text" },
   { id: "portfolio", question: "Please provide your GitHub or portfolio link (optional — type 'no' to skip)", type: "text" }
 ];
 
@@ -91,6 +92,8 @@ function App() {
   const [showSkillExtractor, setShowSkillExtractor] = useState(false);
   const [showDeepScan, setShowDeepScan] = useState(false);
   const [activeInterviewApp, setActiveInterviewApp] = useState(null);
+  const [pendingInterviewGig, setPendingInterviewGig] = useState(null);
+  const [activeInterviewDomain, setActiveInterviewDomain] = useState(null);
 
   // Soft-gate for Apply Now
   const [completedInterviewGigIds, setCompletedInterviewGigIds] = useState(new Set());
@@ -227,7 +230,7 @@ function App() {
       const extracted = extractSkillsFromText(text);
       setSkills(extracted);
       setConversation([{ role: "user", text }]);
-      setTimeout(() => { const q = VOICE_QUESTIONS[0]; setConversation(prev => [...prev, { role: "ai", text: q }]); speak(q); setStep(1); }, 1000);
+      setTimeout(() => { const q = VOICE_QUESTIONS[0]; setConversation(prev => [...prev, { role: "ai", text: q }]); speak(q); setStep(1); }, 300);
     });
   };
 
@@ -244,16 +247,16 @@ function App() {
           setConversation(prev => [...prev, { role: "ai", text: q }]);
           speak(q);
           setStep(nextStep);
-        }, 1000);
+        }, 300);
       } else {
         setTimeout(() => {
           setIsThinking(false);
-          const done = "Great! Now I have 3 more quick questions for you.";
+          const done = "Great! Just one more quick question for you.";
           setConversation(prev => [...prev, { role: "ai", text: done }]);
           speak(done);
           setStep(99);
           setShowExtraQuestions(true);
-        }, 1000);
+        }, 300);
       }
     });
   };
@@ -270,8 +273,6 @@ function App() {
   projectInterest: answers[0],           // field of interest
   confidentSkill: answers[1],            // project/skill they're confident in
   internshipType: answers[2],            // what kind of internship
-  voiceStipend: newAnswers.voiceStipend,
-  hoursPerWeek: newAnswers.hoursPerWeek,
   portfolio: newAnswers.portfolio,
   createdAt: new Date().toISOString()
 };
@@ -346,7 +347,7 @@ function App() {
   const searchWebGigs = async () => {
     setIsAIThinking(true);
     try {
-      const aiResult = await searchInternshipsWithAI(skills, profile?.projectInterest);
+      const aiResult = await searchInternshipsWithAI(skills, getCategoryFromInterest(profile?.projectInterest || ''));
       if (aiResult && aiResult.length > 0) {
         setAiGigs(aiResult);
         setGigsSource('ai');
@@ -409,7 +410,8 @@ function App() {
   };
 
   // ========== MOCK INTERVIEW ==========
-  const handleStartMockInterview = async (gig) => {
+  const handleStartMockInterview = async (gig, domain = null) => {
+    setActiveInterviewDomain(domain);
     try {
       const { data: existing, error: fetchError } = await supabase
         .from('applications')
@@ -556,13 +558,31 @@ function App() {
     return <Auth onLogin={() => {}} />;
   }
 
+  // Domain selector — shown once before Mock Interview starts, so the
+  // question generator gets a real, explicit domain instead of relying
+  // only on keyword-extracted skills (which can come out thin/generic).
+  if (pendingInterviewGig) {
+    return (
+      <DomainSelector
+        onSelect={(domain) => {
+          const gig = pendingInterviewGig;
+          setPendingInterviewGig(null);
+          handleStartMockInterview(gig, domain);
+        }}
+        onCancel={() => setPendingInterviewGig(null)}
+      />
+    );
+  }
+
   // Mock Interview Room
   if (activeInterviewApp) {
     return (
       <InterviewRoom
         application={activeInterviewApp}
+        domain={activeInterviewDomain}
         onComplete={() => {
           setActiveInterviewApp(null);
+          setActiveInterviewDomain(null);
           setCurrentPage('dashboard');          // FIXED: always go to Dashboard
           refreshCompletedInterviews();
         }}
@@ -1046,7 +1066,7 @@ function App() {
             gigsSourceBanner={gigsSourceBanner}
             completedInterviewGigIds={completedInterviewGigIds}
             onStartInterview={handleInitialSpeak}
-            onStartMockInterview={handleStartMockInterview}
+            onStartMockInterview={(gig) => setPendingInterviewGig(gig)}
             onApplyNow={handleApplyNow}
             onViewSkills={openSkillExtractor}
             onFindInternships={searchWebGigs}
@@ -1122,7 +1142,7 @@ function App() {
                       
                       <div className="flex gap-2 mb-2">
                         <button
-                          onClick={() => handleStartMockInterview(gig)}
+                          onClick={() => setPendingInterviewGig(gig)}
                           className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl text-sm font-medium transition flex items-center justify-center gap-1.5"
                         >
                           <Sparkles className="w-3.5 h-3.5" />
@@ -1177,7 +1197,7 @@ function App() {
               onClick={() => {
                 const gig = applyGateGig;
                 setApplyGateGig(null);
-                handleStartMockInterview(gig);
+                setPendingInterviewGig(gig);
               }}
               className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl font-medium transition mb-2"
             >

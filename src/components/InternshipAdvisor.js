@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronLeft, Bot, Mic, Send } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { generateCareerMatchReport } from '../services/aiService';
+import { generateCareerMatchReport, callGroq } from '../services/aiService';
 
 function InternshipAdvisor({ transcript, skills, profile, onBack }) {
   const [messages, setMessages] = useState([]);
@@ -10,7 +10,6 @@ function InternshipAdvisor({ transcript, skills, profile, onBack }) {
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const messagesEndRef = useRef(null);
-  const [apiKey] = useState(process.env.REACT_APP_OPENROUTER_API_KEY || '');
 
   const [lastEvaluation, setLastEvaluation] = useState(null);
   const [careerMatches, setCareerMatches] = useState(null);
@@ -185,10 +184,6 @@ Try asking:
   };
 
   const callAI = async (userMessage) => {
-    if (!apiKey) {
-      return { content: getFallbackResponse(userMessage), fromFallback: true };
-    }
-
     try {
       const evalContext = lastEvaluation?.score !== undefined
         ? `Their most recent interview was for "${lastEvaluation.gigTitle}" at ${lastEvaluation.company}. Score: ${lastEvaluation.score}%. Strengths: ${(lastEvaluation.strengths || []).join('; ') || 'none recorded'}. Weaknesses: ${(lastEvaluation.weaknesses || []).join('; ') || 'none recorded'}.`
@@ -198,40 +193,22 @@ Try asking:
         ? `Their current top role matches: ${careerMatches.map(m => `${m.title} (${m.matchIndex}% match, missing: ${m.roadmap?.join(', ') || 'nothing'})`).join(' | ')}.`
         : 'No career match data available yet — they may not have detected skills.';
 
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': window.location.origin,
-          'X-Title': 'VoiceMatch'
-        },
-        body: JSON.stringify({
-          model: 'nvidia/nemotron-nano-9b-v2:free',
-          messages: [
-            {
-              role: 'system',
-              content: `You are Internship Advisor for VoiceMatch, a personal career counselor who already knows this specific student's real data below. ALWAYS reference their actual score, strengths, weaknesses, or match percentages by name when relevant to their question — never give generic advice that could apply to anyone. If they ask something unrelated to their data, answer normally but still stay warm and specific. Keep responses under 300 words.
+      // Uses the same working Groq function as the Mock Interview.
+      // Returns null if the key is missing or the call fails.
+      const content = await callGroq([
+        {
+          role: 'system',
+          content: `You are Internship Advisor for VoiceMatch, a personal career counselor who already knows this specific student's real data below. ALWAYS reference their actual score, strengths, weaknesses, or match percentages by name when relevant to their question — never give generic advice that could apply to anyone. If they ask something unrelated to their data, answer normally but still stay warm and specific. Keep responses under 300 words.
 
 Student context:
 - Skills: ${skills?.join(', ') || 'Not detected yet'}
 - Project Interest: ${profile?.projectInterest || 'Not specified'}
 - ${evalContext}
 - ${matchContext}`
-            },
-            { role: 'user', content: userMessage }
-          ],
-          temperature: 0.7,
-          max_tokens: 500
-        })
-      });
+        },
+        { role: 'user', content: userMessage }
+      ], 500, 0.7);
 
-      if (response.status === 429 || !response.ok) {
-        return { content: getFallbackResponse(userMessage), fromFallback: true };
-      }
-
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content;
       if (content) return { content, fromFallback: false };
       return { content: getFallbackResponse(userMessage), fromFallback: true };
     } catch (error) {

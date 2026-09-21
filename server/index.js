@@ -66,6 +66,36 @@ app.post('/api/ollama-search', async (req, res) => {
   }
 });
 
+// ===== SERPAPI PROXY ROUTE =====
+// SerpApi blocks direct calls from a browser (CORS), same reason as the
+// Ollama routes above. The React app calls this route instead of hitting
+// serpapi.com directly, and the server forwards the request with the key
+// attached. Requires SERPAPI_KEY set in THIS server's .env (server/.env)
+// — this key never reaches the browser bundle.
+
+app.get('/api/serpapi-jobs', async (req, res) => {
+  const apiKey = process.env.SERPAPI_KEY;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'SERPAPI_KEY not set in server/.env' });
+  }
+  try {
+    const params = new URLSearchParams({
+      engine: 'google_jobs',
+      q: req.query.q || 'internship',
+      location: 'India',
+      gl: 'in',
+      hl: 'en',
+      api_key: apiKey
+    });
+    const response = await fetch(`https://serpapi.com/search?${params.toString()}`);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    console.error('SerpApi proxy error:', err.message);
+    res.status(500).json({ error: 'SerpApi proxy failed', details: err.message });
+  }
+});
+
 // Test route
 app.get('/', (req, res) => {
   res.json({ message: 'VoiceMatch API is running!' });
