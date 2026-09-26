@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import Auth from './components/Auth';
-import { searchInternshipsWithAI, deepScanSkills } from './services/aiService';
+import { searchInternshipsWithAI, deepScanSkills, generateFollowUpQuestion } from './services/aiService';
 import InternshipAdvisor from './components/InternshipAdvisor';
 import StudentDashboard from './components/StudentDashboard';
 import SkillProfilePage from './components/SkillProfilePage';
 import InterviewRoom from './components/InterviewRoom';
 import DomainSelector from './components/DomainSelector';
+import ConfirmDomainScreen from './components/ConfirmDomainScreen';
 import { HARDCODED_GIGS } from './components/hardcodedGigs';
 import LandingPage from './components/LandingPage';
 import HomePage from './components/HomePage';
@@ -26,15 +27,15 @@ const extractSkillsFromText = (text) => {
 };
 
 // ========== VOICE QUESTIONS ==========
-const VOICE_QUESTIONS = [
-  "Which field are you most interested in, and why?",
+// Question 1 is fixed. Questions 2 and 3 are AI-generated follow-ups based
+// on what the student just said (see generateFollowUpQuestion in
+// aiService.js). FALLBACK_FOLLOWUPS is only used if that AI call fails,
+// so the interview can never get stuck with no next question.
+const OPENER_QUESTION = "Which field are you most interested in, and why?";
+const TOTAL_QUESTIONS = 3;
+const FALLBACK_FOLLOWUPS = [
   "Tell me about a project or skill that you're most confident in.",
   "What kind of internship are you looking for?"
-];
-// Stipend and hours-per-week questions removed: live internship results
-// rarely include that data, so asking about it did not improve matching.
-const EXTRA_QUESTIONS = [
-  { id: "portfolio", question: "Please provide your GitHub or portfolio link (optional — type 'no' to skip)", type: "text" }
 ];
 
 // Quick tips shown in the sidebar during the voice interview — fills the
@@ -43,7 +44,7 @@ const EXTRA_QUESTIONS = [
 const INTERVIEW_TIPS = [
   "Speak naturally — no need for perfect sentences.",
   "Mention specific tools, languages, or projects by name.",
-  "It's okay to pause and think before answering.",
+  "Take your time — the mic keeps listening until you tap it again.",
   "You can retake this interview anytime from your profile."
 ];
 
@@ -59,6 +60,63 @@ const getCategoryFromInterest = (interest) => {
   if (lower.includes('product')) return 'Management';
   if (lower.includes('hr')) return 'HR';
   return null;
+};
+
+// SerpApi quota protection: remembers the last result for a given
+// skills+domain combo in the browser for 1 hour, so repeating the same
+// search (while testing or demoing) doesn't spend another real search.
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+const getSearchCacheKey = (skillsList, category) => {
+  const sortedSkills = [...(skillsList || [])].sort().join(',');
+  return `serpapi_cache_${sortedSkills}_${category || 'none'}`;
+};
+
+const getCachedSearch = (skillsList, category) => {
+  try {
+    const raw = localStorage.getItem(getSearchCacheKey(skillsList, category));
+    if (!raw) return null;
+    const { results, savedAt } = JSON.parse(raw);
+    if (Date.now() - savedAt > CACHE_TTL_MS) return null; // expired
+    return results;
+  } catch (e) {
+    return null;
+  }
+};
+
+const setCachedSearch = (skillsList, category, results) => {
+  try {
+    localStorage.setItem(
+      getSearchCacheKey(skillsList, category),
+      JSON.stringify({ results, savedAt: Date.now() })
+    );
+  } catch (e) {
+    // localStorage can fail if full/blocked — safe to ignore, just skip caching
+  }
+};
+
+// Guesses a domain from the voice interview answers using simple keyword
+// matching. Only a starting suggestion — the student confirms or changes
+// it on the ConfirmDomainScreen, so a wrong guess here never reaches the
+// live search on its own.
+const guessDomainFromAnswers = (userProfile, userSkills) => {
+  const text = `${userProfile?.projectInterest || ''} ${userProfile?.confidentSkill || ''} ${userProfile?.internshipType || ''} ${(userSkills || []).join(' ')}`.toLowerCase();
+
+  const rules = [
+    { domain: 'AI / Machine Learning', keywords: ['ai', 'artificial intelligence', 'machine learning', 'ml', 'deep learning', 'neural', 'nlp', 'computer vision'] },
+    { domain: 'Data Science', keywords: ['data science', 'data analysis', 'data analyst', 'pandas', 'sql'] },
+    { domain: 'Web Development', keywords: ['web', 'frontend', 'react', 'html', 'css', 'javascript', 'node'] },
+    { domain: 'App Development', keywords: ['app development', 'flutter', 'android', 'ios', 'mobile app'] },
+    { domain: 'Cloud Computing', keywords: ['cloud', 'aws', 'azure', 'google cloud', 'devops', 'docker', 'kubernetes'] },
+    { domain: 'Cybersecurity', keywords: ['cybersecurity', 'security', 'ethical hacking', 'penetration testing', 'cryptography'] },
+    { domain: 'UI/UX Design', keywords: ['design', 'figma', 'ui', 'ux'] },
+    { domain: 'Marketing', keywords: ['marketing', 'seo', 'social media', 'content writing'] },
+  ];
+
+  for (const rule of rules) {
+    if (rule.keywords.some(k => text.includes(k))) return rule.domain;
+  }
+  return 'Other';
 };
 
 function App() {
@@ -77,13 +135,13 @@ function App() {
   const [leaderboardData, setLeaderboardData] = useState([]);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [liveText, setLiveText] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState([]);
+  const [answerStats, setAnswerStats] = useState([]);
   const [conversation, setConversation] = useState([]);
-  const [showExtraQuestions, setShowExtraQuestions] = useState(false);
-  const [extraStep, setExtraStep] = useState(0);
-  const [extraAnswers, setExtraAnswers] = useState({});
+  const [questions, setQuestions] = useState([OPENER_QUESTION]);
   const [filterCategory, setFilterCategory] = useState('all');
   const [selectedGigForModal, setSelectedGigForModal] = useState(null);
   const [isAIThinking, setIsAIThinking] = useState(false);
@@ -95,21 +153,28 @@ function App() {
   const [pendingInterviewGig, setPendingInterviewGig] = useState(null);
   const [activeInterviewDomain, setActiveInterviewDomain] = useState(null);
 
-  // Soft-gate for Apply Now
   const [completedInterviewGigIds, setCompletedInterviewGigIds] = useState(new Set());
   const [applyGateGig, setApplyGateGig] = useState(null);
 
-  // NEW: AI Interview Insights report after voice interview
   const [showVoiceReport, setShowVoiceReport] = useState(false);
+  // Domain confirmed after the voice interview report — becomes the
+  // trusted category for the live internship search.
+  const [showDomainConfirm, setShowDomainConfirm] = useState(false);
+  const [confirmedDomain, setConfirmedDomain] = useState(null);
 
-  // ========== AUTH ==========
+  const [coachTip, setCoachTip] = useState(null);
+  const [celebratedSkills, setCelebratedSkills] = useState(new Set());
+
+  const recognitionRef = useRef(null);
+
+  const liveSkills = Array.from(new Set([...skills, ...extractSkillsFromText(liveText)]));
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user || null));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user || null));
     return () => subscription.unsubscribe();
   }, []);
 
-  // Dev-only auto-login fallback
   const DEV_AUTO_LOGIN = false;
   useEffect(() => {
     if (DEV_AUTO_LOGIN && !user) {
@@ -117,20 +182,16 @@ function App() {
     }
   }, [user]);
 
-  // ========== USER RANK & LEVEL ==========
   useEffect(() => {
     const calculateRankAndLevel = async () => {
       if (!user?.email) return;
-      
       const { data } = await supabase
         .from('students')
         .select('email, points')
         .order('points', { ascending: false });
-      
       if (data) {
         const userIndex = data.findIndex(s => s.email === user.email);
         setUserRank(userIndex !== -1 ? userIndex + 1 : null);
-        
         const points = userPoints || 0;
         if (points >= 500) setUserLevel('Master');
         else if (points >= 300) setUserLevel('Expert');
@@ -139,11 +200,9 @@ function App() {
         else setUserLevel('Beginner');
       }
     };
-    
     calculateRankAndLevel();
   }, [user, userPoints]);
 
-  // ========== FETCH GIGS FROM SUPABASE ==========
   useEffect(() => {
     const fetchGigs = async () => {
       const { data, error } = await supabase.from('gigs').select('*');
@@ -152,7 +211,6 @@ function App() {
     fetchGigs();
   }, []);
 
-  // ========== FETCH COMPLETED MOCK INTERVIEWS ==========
   const refreshCompletedInterviews = async () => {
     if (!user?.email) return;
     const { data, error } = await supabase
@@ -169,11 +227,9 @@ function App() {
     refreshCompletedInterviews();
   }, [user]);
 
-  // ========== LEADERBOARD ==========
   useEffect(() => {
     const fetchLeaderboard = async () => {
       const { data } = await supabase.from('students').select('name, skills, points').order('points', { ascending: false }).limit(10);
-
       const dummyStudents = [
         { name: 'Aarav kumar', skills: ['React', 'JavaScript', 'CSS'], points: 180 },
         { name: 'Priya singh', skills: ['Python', 'SQL', 'Data Analysis'], points: 155 },
@@ -183,11 +239,8 @@ function App() {
         { name: 'Daisy dale', skills: ['Marketing', 'SEO', 'Content Writing'], points: 75 },
         { name: 'Abraham john', skills: ['Java', 'C++', 'Problem Solving'], points: 60 },
       ];
-
       if (data && data.length > 0) {
-        const combined = [...data, ...dummyStudents]
-          .sort((a, b) => (b.points || 0) - (a.points || 0))
-          .slice(0, 10);
+        const combined = [...data, ...dummyStudents].sort((a, b) => (b.points || 0) - (a.points || 0)).slice(0, 10);
         setLeaderboardData(combined);
       } else {
         setLeaderboardData(dummyStudents);
@@ -196,7 +249,6 @@ function App() {
     fetchLeaderboard();
   }, [userPoints]);
 
-  // ========== USER POINTS ==========
   useEffect(() => {
     const fetchPoints = async () => {
       if (!user?.email) return;
@@ -206,98 +258,203 @@ function App() {
     fetchPoints();
   }, [user]);
 
-  // ========== SPEECH HELPERS ==========
   const speak = (text) => { const utterance = new SpeechSynthesisUtterance(text); utterance.lang = "en-US"; window.speechSynthesis.speak(utterance); };
+
+  const flashCoachTip = (text, tone = 'info', holdMs = 3200) => {
+    setCoachTip({ text, tone });
+    if (holdMs > 0) {
+      setTimeout(() => {
+        setCoachTip(prev => (prev && prev.text === text ? null : prev));
+      }, holdMs);
+    }
+  };
+
+  useEffect(() => {
+    if (!isListening || !liveText) return;
+    const words = liveText.trim().split(/\s+/).filter(Boolean);
+    const wordCount = words.length;
+    const detectedNow = extractSkillsFromText(liveText);
+    const brandNew = detectedNow.filter(s => !celebratedSkills.has(s) && !skills.includes(s));
+    if (brandNew.length > 0) {
+      const skill = brandNew[0];
+      setCelebratedSkills(prev => new Set([...prev, skill]));
+      flashCoachTip(`Nice — ${skill} detected ✓`, 'success', 2800);
+      return;
+    }
+    if (wordCount === 6) {
+      flashCoachTip('Good start — add one concrete example', 'nudge', 2500);
+    } else if (wordCount === 18) {
+      flashCoachTip('Great detail — keep going if you have more', 'success', 2200);
+    }
+  }, [liveText, isListening]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Records one answer. Keeps listening THROUGH pauses (continuous mode)
+  // instead of stopping the instant you go quiet — that was cutting you
+  // off before. Finishes only when either (a) you go quiet for ~3.5s, or
+  // (b) you tap the mic again to say "I'm done".
   const startListening = (onResult) => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) { alert("Speech recognition not supported!"); return; }
     const recognition = new SpeechRecognition();
     recognition.lang = "en-US";
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    const startedAt = Date.now();
+    let speechStartedAt = null;
+    let latestText = '';
+    let finished = false;
+    let silenceTimer = null;
+
+    setLiveText('');
+    setCoachTip({ text: "Listening… tap the mic again when you're done", tone: 'info' });
     setIsListening(true);
-    recognition.onresult = (e) => { const text = e.results[0][0].transcript; setIsListening(false); onResult(text); };
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => { setIsListening(false); alert("Could not hear you. Please try again."); };
+    recognitionRef.current = recognition;
+
+    const finishUp = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(silenceTimer);
+      setIsListening(false);
+      recognitionRef.current = null;
+      try { recognition.stop(); } catch (e) { /* already stopped */ }
+
+      const begin = speechStartedAt || startedAt;
+      const end = Date.now();
+      const timing = {
+        thinkingSec: (begin - startedAt) / 1000,
+        speakingSec: Math.max((end - begin) / 1000, 0.5)
+      };
+
+      const text = latestText;
+      const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+      const wpm = wordCount > 0 ? Math.round(wordCount / (timing.speakingSec / 60)) : 0;
+
+      if (timing.thinkingSec > 5) {
+        flashCoachTip('Took a moment to start — try diving in faster next time', 'nudge', 3500);
+      } else if (wpm > 175) {
+        flashCoachTip('A bit fast — slower = clearer for interviewers', 'nudge', 3500);
+      } else if (wpm > 0 && wpm < 90 && wordCount > 5) {
+        flashCoachTip('Steady pace — nice and clear', 'success', 3000);
+      } else if (wordCount < 8) {
+        flashCoachTip('Short answer — next time add a project or tool by name', 'nudge', 3500);
+      } else if (extractSkillsFromText(text).length >= 2) {
+        flashCoachTip('Strong technical vocabulary — well done', 'success', 3000);
+      } else {
+        flashCoachTip('Got it — solid answer', 'success', 2200);
+      }
+
+      onResult(text, timing);
+    };
+
+    recognition.onspeechstart = () => { if (!speechStartedAt) speechStartedAt = Date.now(); };
+
+    recognition.onresult = (e) => {
+      let text = '';
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript + ' ';
+      latestText = text.trim();
+      setLiveText(latestText);
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(finishUp, 3500);
+    };
+
+    recognition.onend = () => { if (!finished) finishUp(); };
+    recognition.onerror = () => {
+      setIsListening(false);
+      setLiveText('');
+      setCoachTip(null);
+      recognitionRef.current = null;
+      alert("Could not hear you. Please try again.");
+    };
     recognition.start();
   };
 
-  // ========== VOICE INTERVIEW ==========
   const handleInitialSpeak = () => {
-    setConversation([]); setSkills([]); setAnswers([]); setStep(0); setProfile(null); setMatchedGigs([]); setShowExtraQuestions(false); setShowVoiceReport(false);
-    startListening((text) => {
+    setConversation([]); setSkills([]); setAnswers([]); setAnswerStats([]); setQuestions([OPENER_QUESTION]); setStep(0); setProfile(null); setMatchedGigs([]); setShowVoiceReport(false);
+    setShowDomainConfirm(false); setConfirmedDomain(null);
+    setCoachTip(null); setCelebratedSkills(new Set());
+    startListening((text, timing) => {
       setTranscript(text);
       const extracted = extractSkillsFromText(text);
       setSkills(extracted);
       setConversation([{ role: "user", text }]);
-      setTimeout(() => { const q = VOICE_QUESTIONS[0]; setConversation(prev => [...prev, { role: "ai", text: q }]); speak(q); setStep(1); }, 300);
+      setTimeout(() => { setConversation(prev => [...prev, { role: "ai", text: OPENER_QUESTION }]); speak(OPENER_QUESTION); setStep(1); }, 300);
     });
   };
 
   const handleVoiceAnswer = () => {
-    startListening((text) => {
-      setAnswers(prev => [...prev, text]);
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    startListening((text, timing) => {
+      const mergedSkills = Array.from(new Set([...skills, ...extractSkillsFromText(text)]));
+      const allAnswers = [...answers, text];
+      const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+      const stat = {
+        words: wordCount,
+        thinkingSec: Math.round(timing.thinkingSec * 10) / 10,
+        speakingSec: Math.round(timing.speakingSec * 10) / 10,
+        wpm: Math.round(wordCount / (timing.speakingSec / 60)),
+        text,
+        skillCount: extractSkillsFromText(text).length
+      };
+      console.log('Answer stats:', stat);
+      setAnswerStats([...answerStats, stat]);
+      setSkills(mergedSkills);
+      setAnswers(allAnswers);
       setConversation(prev => [...prev, { role: "user", text }]);
       const nextStep = step + 1;
       setIsThinking(true);
-      if (nextStep < VOICE_QUESTIONS.length) {
-        setTimeout(() => {
+      if (allAnswers.length < TOTAL_QUESTIONS) {
+        generateFollowUpQuestion(text, allAnswers.length + 1).then((aiQuestion) => {
+          const q = aiQuestion || FALLBACK_FOLLOWUPS[allAnswers.length - 1];
+          setQuestions(prev => [...prev, q]);
           setIsThinking(false);
-          const q = VOICE_QUESTIONS[nextStep];
           setConversation(prev => [...prev, { role: "ai", text: q }]);
           speak(q);
           setStep(nextStep);
-        }, 300);
+        });
       } else {
         setTimeout(() => {
           setIsThinking(false);
-          const done = "Great! Just one more quick question for you.";
+          const done = "Great! I've got what I need. Let's see your results.";
           setConversation(prev => [...prev, { role: "ai", text: done }]);
           speak(done);
-          setStep(99);
-          setShowExtraQuestions(true);
+          finishInterview(allAnswers, mergedSkills);
         }, 300);
       }
     });
   };
 
-  const handleExtraAnswer = (value) => {
-    const newAnswers = { ...extraAnswers, [EXTRA_QUESTIONS[extraStep].id]: value };
-    setExtraAnswers(newAnswers);
-    if (extraStep + 1 < EXTRA_QUESTIONS.length) {
-      setExtraStep(extraStep + 1);
-    } else {
-      
-       const newProfile = {
-  skills: skills,
-  projectInterest: answers[0],           // field of interest
-  confidentSkill: answers[1],            // project/skill they're confident in
-  internshipType: answers[2],            // what kind of internship
-  portfolio: newAnswers.portfolio,
-  createdAt: new Date().toISOString()
-};
-      setProfile(newProfile);
-      matchGigs(newProfile);
-      setShowExtraQuestions(false);
-      setShowVoiceReport(true);   // ← Show AI Interview Insights
+  const finishInterview = (finalAnswers, finalSkills) => {
+    const newProfile = {
+      skills: finalSkills,
+      projectInterest: finalAnswers[0],
+      confidentSkill: finalAnswers[1],
+      internshipType: finalAnswers[2],
+      createdAt: new Date().toISOString()
+    };
+    setProfile(newProfile);
+    matchGigs(newProfile);
+    setStep(99);
+    setShowVoiceReport(true);
 
-      const saveToSupabase = async () => {
-        try {
-          const { data: existing } = await supabase.from('students').select('email').eq('email', user?.email).maybeSingle();
-          const userName = user?.email?.split('@')[0] || 'Student';
-          if (existing) {
-            await supabase.from('students').update({ name: userName, skills: newProfile.skills, project_interest: newProfile.projectInterest, hours_per_week: newProfile.hoursPerWeek, voice_stipend: newProfile.voiceStipend, work_type: newProfile.workType, commitment_duration: newProfile.commitmentDuration, portfolio: newProfile.portfolio }).eq('email', user?.email);
-          } else {
-            await supabase.from('students').insert([{ email: user?.email, password_hash: 'temp', name: userName, skills: newProfile.skills, project_interest: newProfile.projectInterest, hours_per_week: newProfile.hoursPerWeek, voice_stipend: newProfile.voiceStipend, work_type: newProfile.workType, commitment_duration: newProfile.commitmentDuration, portfolio: newProfile.portfolio, points: 50, created_at: newProfile.createdAt }]);
-            setUserPoints(prev => prev + 50);
-          }
-        } catch (error) { console.error(error); }
-      };
-      saveToSupabase();
-    }
+    const saveToSupabase = async () => {
+      try {
+        const { data: existing } = await supabase.from('students').select('email').eq('email', user?.email).maybeSingle();
+        const userName = user?.email?.split('@')[0] || 'Student';
+        if (existing) {
+          await supabase.from('students').update({ name: userName, skills: newProfile.skills, project_interest: newProfile.projectInterest }).eq('email', user?.email);
+        } else {
+          await supabase.from('students').insert([{ email: user?.email, password_hash: 'temp', name: userName, skills: newProfile.skills, project_interest: newProfile.projectInterest, points: 50, created_at: newProfile.createdAt }]);
+          setUserPoints(prev => prev + 50);
+        }
+      } catch (error) { console.error(error); }
+    };
+    saveToSupabase();
   };
 
-  // ========== MATCH GIGS ==========
   const scoreGigsAgainstProfile = (gigsList, userProfile) => {
     const preferredCategory = getCategoryFromInterest(userProfile.projectInterest || '');
     const scored = gigsList.map(gig => {
@@ -343,18 +500,32 @@ function App() {
     }
   };
 
-  // ========== AI SEARCH ==========
+  // Live search — uses the CONFIRMED domain from ConfirmDomainScreen as
+  // the trusted category. Falls back to the old keyword-based guess only
+  // if somehow no domain was confirmed (e.g. searching before that screen
+  // ever ran), so this can never throw or leave the query empty.
   const searchWebGigs = async () => {
-    setIsAIThinking(true);
-    try {
-      const aiResult = await searchInternshipsWithAI(skills, getCategoryFromInterest(profile?.projectInterest || ''));
-      if (aiResult && aiResult.length > 0) {
-        setAiGigs(aiResult);
-        setGigsSource('ai');
-        setIsAIThinking(false);
-        return;
-      }
+  setIsAIThinking(true);
+  try {
+    const category = confirmedDomain || getCategoryFromInterest(profile?.projectInterest || '');
 
+    const cached = getCachedSearch(skills, category);
+    if (cached && cached.length > 0) {
+      console.log('Using cached SerpApi results — no search spent.');
+      setAiGigs(cached);
+      setGigsSource('ai');
+      setIsAIThinking(false);
+      return;
+    }
+
+    const aiResult = await searchInternshipsWithAI(skills, category);
+    if (aiResult && aiResult.length > 0) {
+      setCachedSearch(skills, category, aiResult);
+      setAiGigs(aiResult);
+      setGigsSource('ai');
+      setIsAIThinking(false);
+      return;
+    }
       const supabaseMatches = scoreGigsAgainstProfile(allGigs, profile || { skills });
       if (supabaseMatches.length > 0) {
         setAiGigs(supabaseMatches);
@@ -362,7 +533,6 @@ function App() {
         setIsAIThinking(false);
         return;
       }
-
       const hcScored = HARDCODED_GIGS.map(gig => {
         const matchCount = skills.length > 0
           ? skills.filter(s => gig.skills.some(gs => gs.toLowerCase().includes(s.toLowerCase()))).length
@@ -372,10 +542,8 @@ function App() {
           : 50;
         return { ...gig, matchScore, skillMatchCount: matchCount };
       }).sort((a, b) => b.matchScore - a.matchScore);
-
       const relevant = skills.length > 0 ? hcScored.filter(g => g.skillMatchCount > 0) : hcScored;
       const hcToShow = (relevant.length > 0 ? relevant : hcScored).slice(0, 12);
-
       setAiGigs(hcToShow);
       setGigsSource('hardcoded');
     } catch (error) {
@@ -388,12 +556,11 @@ function App() {
   };
 
   const gigsSourceBanner = {
-    ai: { text: '🌐 Live AI search results', color: 'bg-blue-600' },
-    supabase: { text: '📦 AI unavailable — showing matched gigs from our database', color: 'bg-yellow-600' },
-    hardcoded: { text: '⚠️ AI & database unavailable — showing sample internships', color: 'bg-orange-600' }
+    ai: { text: '🌐 Live Internships — Powered by SerpApi', color: 'bg-blue-600' },
+    supabase: { text: '📦 Live search unavailable — showing matched sample internships', color: 'bg-yellow-600' },
+    hardcoded: { text: '⚠️ Live search unavailable — showing sample internships', color: 'bg-orange-600' }
   };
 
-  // ========== SAVE ==========
   const toggleSave = async (gigId) => {
     const isSaved = savedGigs.includes(gigId);
     isSaved ? setSavedGigs(savedGigs.filter(id => id !== gigId)) : setSavedGigs([...savedGigs, gigId]);
@@ -409,7 +576,6 @@ function App() {
     } catch (err) { console.error(err); }
   };
 
-  // ========== MOCK INTERVIEW ==========
   const handleStartMockInterview = async (gig, domain = null) => {
     setActiveInterviewDomain(domain);
     try {
@@ -419,14 +585,11 @@ function App() {
         .eq('student_email', user?.email)
         .eq('gig_id', gig.id)
         .maybeSingle();
-
       if (fetchError) console.error('Lookup failed:', fetchError);
-
       if (existing) {
         setActiveInterviewApp(existing);
         return;
       }
-
       const { data: inserted, error: insertError } = await supabase
         .from('applications')
         .insert([{
@@ -443,20 +606,17 @@ function App() {
         }])
         .select()
         .single();
-
       if (insertError || !inserted) {
         console.error('Could not start mock interview:', insertError);
         alert('Could not start the mock interview — please try again.');
         return;
       }
-
       setActiveInterviewApp(inserted);
     } catch (err) {
       console.error('handleStartMockInterview error:', err);
     }
   };
 
-  // ========== APPLY NOW ==========
   const handleApplyNow = (gig) => {
     if (gigsSource === 'hardcoded' && !gig.url) {
       alert('This is a sample listing shown because live search found nothing. Try "Find Internships" again to get real internships you can apply to.');
@@ -469,15 +629,12 @@ function App() {
     }
   };
 
-  // FIXED: Now creates the row if it doesn't exist (Apply Anyway path)
   const redirectToApplication = async (gig) => {
     const url = getApplicationUrl(gig);
     window.open(url, '_blank', 'noopener,noreferrer');
-
     if (!appliedGigs.includes(gig.id)) {
       setAppliedGigs(prev => [...prev, gig.id]);
     }
-
     try {
       const { data: existing } = await supabase
         .from('applications')
@@ -485,35 +642,27 @@ function App() {
         .eq('student_email', user?.email)
         .eq('gig_id', gig.id)
         .maybeSingle();
-
       if (existing) {
-        await supabase
-          .from('applications')
-          .update({ status: 'applied' })
-          .eq('id', existing.id);
+        await supabase.from('applications').update({ status: 'applied' }).eq('id', existing.id);
       } else {
-        // Apply Anyway path — create the row so dashboard shows it
-        await supabase
-          .from('applications')
-          .insert([{
-            student_email: user?.email,
-            gig_id: gig.id,
-            gig_title: gig.title,
-            company: gig.company,
-            stipend: gig.stipend,
-            gig_skills: gig.skills || [],
-            gig_url: gig.url || null,
-            status: 'applied',
-            interview_completed: false,
-            applied_at: new Date()
-          }]);
+        await supabase.from('applications').insert([{
+          student_email: user?.email,
+          gig_id: gig.id,
+          gig_title: gig.title,
+          company: gig.company,
+          stipend: gig.stipend,
+          gig_skills: gig.skills || [],
+          gig_url: gig.url || null,
+          status: 'applied',
+          interview_completed: false,
+          applied_at: new Date()
+        }]);
       }
-
       const { data: student } = await supabase.from('students').select('points').eq('email', user?.email).maybeSingle();
       await supabase.from('students').update({ points: (student?.points || 0) + 10 }).eq('email', user?.email);
       setUserPoints(prev => prev + 10);
-    } catch (err) { 
-      console.error(err); 
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -521,24 +670,13 @@ function App() {
     const fromDatabase = allGigs.filter(gig => savedGigs.includes(gig.id));
     const fromAI = aiGigs.filter(gig => savedGigs.includes(gig.id));
     const combined = [...fromDatabase, ...fromAI];
-    return combined.filter((gig, index, self) =>
-      index === self.findIndex(g => g.id === gig.id)
-    );
+    return combined.filter((gig, index, self) => index === self.findIndex(g => g.id === gig.id));
   };
 
   const getFilteredGigs = () => filterCategory === 'all' ? matchedGigs : matchedGigs.filter(gig => gig.category === filterCategory);
   const categories = ['all', 'Development', 'Design', 'Marketing', 'Data', 'Content', 'Testing', 'Management', 'HR'];
-
   const displayGigs = aiGigs.length > 0 ? aiGigs : getFilteredGigs();
 
-  // ========== OVERLAY NAVIGATION (single-source-of-truth guards) ==========
-  // Every full-screen "page" flag (showSkillExtractor, showDeepScan,
-  // showVoiceReport) must be mutually exclusive. If two ever end up true
-  // at once, whichever check appears first in renderContent()'s if-chain
-  // silently wins, and the other stays hidden until something else resets
-  // the winning flag — which looks like "the page I wanted doesn't open
-  // until I click Back somewhere else." These helpers guarantee only one
-  // overlay is ever true, no matter what order buttons are clicked in.
   const closeAllOverlays = () => {
     setShowSkillExtractor(false);
     setShowDeepScan(false);
@@ -550,17 +688,12 @@ function App() {
     setShowSkillExtractor(true);
   };
 
-  // ========== RENDER ==========
   const renderContent = () => {
   if (showLanding) return <LandingPage onStart={() => setShowLanding(false)} />;
-
   if (!user) {
     return <Auth onLogin={() => {}} />;
   }
 
-  // Domain selector — shown once before Mock Interview starts, so the
-  // question generator gets a real, explicit domain instead of relying
-  // only on keyword-extracted skills (which can come out thin/generic).
   if (pendingInterviewGig) {
     return (
       <DomainSelector
@@ -574,7 +707,6 @@ function App() {
     );
   }
 
-  // Mock Interview Room
   if (activeInterviewApp) {
     return (
       <InterviewRoom
@@ -583,7 +715,7 @@ function App() {
         onComplete={() => {
           setActiveInterviewApp(null);
           setActiveInterviewDomain(null);
-          setCurrentPage('dashboard');          // FIXED: always go to Dashboard
+          setCurrentPage('dashboard');
           refreshCompletedInterviews();
         }}
       />
@@ -606,22 +738,29 @@ function App() {
     return <InternshipAdvisor transcript={transcript} skills={skills} profile={profile} onBack={() => setShowDeepScan(false)} />;
   }
 
-  // ========== AI INTERVIEW INSIGHTS (Voice Interview Report) ==========
   if (showVoiceReport && profile) {
     const skillCount = skills.length;
-    const base = Math.min(88, 58 + skillCount * 5);
+    const totalWords = answerStats.reduce((sum, a) => sum + a.words, 0);
+    const totalSpeakingSec = answerStats.reduce((sum, a) => sum + a.speakingSec, 0);
+    const totalThinkingSec = answerStats.reduce((sum, a) => sum + a.thinkingSec, 0);
+    const avgWpm = totalSpeakingSec > 0 ? Math.round(totalWords / (totalSpeakingSec / 60)) : 0;
+    const avgThinkingSec = answerStats.length > 0 ? totalThinkingSec / answerStats.length : 0;
+    const avgWords = answerStats.length > 0 ? totalWords / answerStats.length : 0;
+
+    const paceScore = avgWpm === 0 ? 50 : Math.max(40, 100 - Math.abs(135 - avgWpm) * 0.6);
+    const readinessScore = Math.max(40, 100 - avgThinkingSec * 12);
+    const depthScore = Math.min(100, 40 + avgWords * 3);
+    const vocabScore = Math.min(100, 50 + skillCount * 8);
 
     const scores = {
-      communication: Math.min(94, base + 7),
-      technicalVocabulary: Math.min(92, base + 9),
-      speakingSpeed: Math.min(90, base + 4),
-      fillerWordControl: Math.min(91, base + 6),
-      responseQuality: Math.min(89, base + 5),
+      responseReadiness: Math.round(readinessScore),
+      speakingPace: Math.round(paceScore),
+      answerDepth: Math.round(depthScore),
+      technicalVocabulary: Math.round(vocabScore),
     };
 
     const overall = Math.round(
-      (scores.communication + scores.technicalVocabulary + scores.speakingSpeed +
-       scores.fillerWordControl + scores.responseQuality) / 5
+      (scores.responseReadiness + scores.speakingPace + scores.answerDepth + scores.technicalVocabulary) / 4
     );
 
     const getBarColor = (v) => v >= 75 ? 'bg-green-500' : v >= 55 ? 'bg-amber-400' : 'bg-red-400';
@@ -631,23 +770,20 @@ function App() {
     if (overall >= 80) {
       overallMessage = "You're well prepared for entry-level technical internships.";
     } else if (overall >= 65) {
-      overallMessage = "Suitable for beginner internships. Continue practicing to improve structure and examples.";
+      overallMessage = "Suitable for beginner internships. Continue practicing to improve pace and detail.";
     } else {
-      overallMessage = "Keep practicing. Focus on clearer structure and adding real project examples.";
+      overallMessage = "Keep practicing. Focus on quicker responses and more detailed answers.";
     }
 
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-8 max-w-2xl w-full">
-          
           <div className="text-center mb-6">
             <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
               <Sparkles className="w-7 h-7 text-purple-600" />
             </div>
             <h2 className="text-2xl font-bold text-slate-900">AI Interview Insights</h2>
-            <p className="text-slate-500 text-sm mt-1">
-              AI-estimated insights based on your interview responses
-            </p>
+            <p className="text-slate-500 text-sm mt-1">Measured from how you actually spoke during the interview</p>
           </div>
 
           <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-2xl p-6 text-center mb-8 border border-purple-100">
@@ -655,18 +791,41 @@ function App() {
             <p className="text-5xl font-bold text-purple-700">
               {overall}<span className="text-2xl text-purple-400">/100</span>
             </p>
-            <p className="text-slate-600 text-sm mt-3 leading-relaxed">
-              {overallMessage}
-            </p>
+            <p className="text-slate-600 text-sm mt-3 leading-relaxed">{overallMessage}</p>
           </div>
+
+          {answerStats.length > 0 && (() => {
+            const strongest = answerStats.reduce((best, a, i) => {
+              const composite = a.skillCount * 25 + Math.min(a.words, 30) + (a.wpm >= 100 && a.wpm <= 160 ? 15 : 0);
+              return (!best || composite > best.composite) ? { ...a, index: i, composite } : best;
+            }, null);
+            const questionText = questions[strongest.index] || `Question ${strongest.index + 1}`;
+            return (
+              <div className="mb-8 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-2xl p-5 border border-indigo-100">
+                <h4 className="text-sm font-semibold text-indigo-700 mb-1">🌟 Your Strongest Moment</h4>
+                <p className="text-xs text-slate-500 mb-3">"{questionText}"</p>
+                <p className="text-sm text-slate-700 italic mb-3">"{strongest.text}"</p>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <p className="text-xs text-slate-500">
+                    {strongest.speakingSec}s spoken · {strongest.wpm} wpm · {strongest.skillCount} technical term{strongest.skillCount === 1 ? '' : 's'}
+                  </p>
+                  <button
+                    onClick={() => speak(strongest.text)}
+                    className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1"
+                  >
+                    ▶ Replay
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="grid grid-cols-2 gap-4 mb-8">
             {[
-              { label: 'Communication', value: scores.communication },
+              { label: 'Response Readiness', value: scores.responseReadiness },
+              { label: 'Speaking Pace', value: scores.speakingPace },
+              { label: 'Answer Depth', value: scores.answerDepth },
               { label: 'Technical Vocabulary', value: scores.technicalVocabulary },
-              { label: 'Speaking Speed', value: scores.speakingSpeed },
-              { label: 'Filler Word Control', value: scores.fillerWordControl },
-              { label: 'Response Quality', value: scores.responseQuality },
             ].map((item) => (
               <div key={item.label} className="bg-slate-50 rounded-xl p-4">
                 <div className="flex justify-between items-center mb-2">
@@ -674,13 +833,36 @@ function App() {
                   <span className={`text-sm font-bold ${getTextColor(item.value)}`}>{item.value}</span>
                 </div>
                 <div className="w-full bg-slate-200 rounded-full h-2">
-                  <div 
-                    className={`h-2 rounded-full ${getBarColor(item.value)}`} 
-                    style={{ width: `${item.value}%` }}
-                  />
+                  <div className={`h-2 rounded-full ${getBarColor(item.value)}`} style={{ width: `${item.value}%` }} />
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="mb-8">
+            <h4 className="text-sm font-semibold text-slate-700 mb-3">🎙️ Your Interview Timeline</h4>
+            <div className="flex flex-col gap-3">
+              {answerStats.map((a, i) => {
+                const total = a.thinkingSec + a.speakingSec;
+                const thinkPct = total > 0 ? (a.thinkingSec / total) * 100 : 0;
+                return (
+                  <div key={i} className="bg-slate-50 rounded-xl p-3">
+                    <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                      <span>Question {i + 1}</span>
+                      <span>{a.thinkingSec}s thinking · {a.speakingSec}s speaking · {a.wpm} wpm</span>
+                    </div>
+                    <div className="w-full h-2.5 rounded-full overflow-hidden flex bg-slate-200">
+                      <div className="h-full bg-amber-300" style={{ width: `${thinkPct}%` }} />
+                      <div className="h-full bg-purple-500" style={{ width: `${100 - thinkPct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-4 mt-2 text-xs text-slate-400">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-300 inline-block"></span> Thinking</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block"></span> Speaking</span>
+            </div>
           </div>
 
           <div className="space-y-5 mb-8">
@@ -711,7 +893,7 @@ function App() {
           </div>
 
           <button
-            onClick={() => setShowVoiceReport(false)}
+            onClick={() => { setShowVoiceReport(false); setShowDomainConfirm(true); }}
             className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3.5 rounded-xl font-medium transition"
           >
             Continue to Internships →
@@ -721,17 +903,28 @@ function App() {
     );
   }
 
-  // Voice Interview steps — redesigned to fill the empty space around the
-  // chat: gradient blobs to match the landing page, a two-column layout
-  // (chat + mic on the left, live waveform / tips / progress on the right
-  // for wider screens), and an animated waveform instead of a single
-  // pulsing ring so the "listening" moment has more visual energy.
-  if (step > 0 && step < 99 && !profile && !showExtraQuestions) {
+  // "Confirm your domain" — shown once, right after the voice report,
+  // before any internship search happens. Whatever the student confirms
+  // here becomes the trusted category for searchWebGigs, so a bad or
+  // empty voice transcript can never send the live search to the wrong field.
+  if (showDomainConfirm) {
+    const guess = guessDomainFromAnswers(profile, skills);
+    return (
+      <ConfirmDomainScreen
+        guessedDomain={guess}
+        onConfirm={(domain) => {
+          setConfirmedDomain(domain);
+          setShowDomainConfirm(false);
+        }}
+      />
+    );
+  }
+
+  if (step > 0 && step < 99 && !profile) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-purple-50/40 via-white to-slate-50/60 relative overflow-hidden">
         <div className="absolute -top-32 -right-32 w-96 h-96 bg-purple-300/20 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-32 -left-32 w-96 h-96 bg-purple-400/15 rounded-full blur-3xl pointer-events-none" />
-
         <div className="relative max-w-6xl mx-auto px-6 py-10">
           <div className="text-center mb-8">
             <div className="inline-flex items-center gap-2 bg-purple-50 border border-purple-200/60 rounded-full px-4 py-1.5 mb-4">
@@ -743,14 +936,12 @@ function App() {
           </div>
 
           <div className="grid lg:grid-cols-3 gap-6 items-start">
-
-            {/* Left: chat + mic (spans 2 columns on wide screens) */}
             <div className="lg:col-span-2">
               <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                   <p className="text-slate-500 text-xs font-medium uppercase tracking-wide">Voice Interview Assistant</p>
-                  <span className="ml-auto text-xs text-slate-400">Question {step} of {VOICE_QUESTIONS.length}</span>
+                  <span className="ml-auto text-xs text-slate-400">Question {step} of {TOTAL_QUESTIONS}</span>
                 </div>
                 <div className="flex flex-col gap-3 max-h-96 overflow-y-auto">
                   {conversation.map((msg, i) => (
@@ -768,53 +959,70 @@ function App() {
                       </div>
                     </div>
                   )}
+                  {isListening && liveText && (
+                    <div className="flex justify-end">
+                      <div className="px-4 py-2.5 rounded-2xl max-w-xs text-sm bg-purple-400 text-white rounded-br-none opacity-80">
+                        {liveText}…
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-8 flex flex-col items-center">
+                {coachTip && (
+                  <div
+                    key={coachTip.text}
+                    className={`mb-4 max-w-sm w-full px-4 py-3 rounded-2xl text-sm font-medium shadow-md animate-[coachPop_0.35s_ease-out] border ${
+                      coachTip.tone === 'success'
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : coachTip.tone === 'nudge'
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : 'bg-purple-50 text-purple-800 border-purple-200'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="text-base leading-none mt-0.5">
+                        {coachTip.tone === 'success' ? '✨' : coachTip.tone === 'nudge' ? '💡' : '🎙️'}
+                      </span>
+                      <span>{coachTip.text}</span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="relative mb-5 flex items-center justify-center">
                   {isListening && (
                     <>
                       <div className="absolute inset-0 rounded-full bg-purple-400 opacity-20 animate-ping"></div>
-                      {/* Animated waveform bars around the mic while listening */}
                       <div className="absolute -inset-6 flex items-center justify-center gap-1 pointer-events-none">
                         {[0, 1, 2, 3, 4].map(i => (
                           <div
                             key={i}
                             className="w-1 bg-purple-400/70 rounded-full"
-                            style={{
-                              height: '10px',
-                              animation: `voiceBar 0.9s ease-in-out ${i * 0.12}s infinite`
-                            }}
+                            style={{ height: '10px', animation: `voiceBar 0.9s ease-in-out ${i * 0.12}s infinite` }}
                           />
                         ))}
                       </div>
                     </>
                   )}
-                  <button 
-                    onClick={handleVoiceAnswer} 
-                    disabled={isListening} 
+                  <button
+                    onClick={handleVoiceAnswer}
                     className={`relative w-28 h-28 rounded-full text-4xl shadow-xl transition-all duration-300 ${isListening ? "bg-red-500 scale-110 text-white animate-pulse" : "bg-purple-600 hover:bg-purple-700 text-white hover:scale-105"}`}
                   >
                     <Mic className="w-12 h-12 mx-auto" />
                   </button>
                 </div>
                 <p className="text-slate-600 text-md font-medium">
-                  {isListening ? "🔴 Listening... speak now!" : "🎙️ Tap mic to answer"}
+                  {isListening ? "🔴 Listening... tap again when you're done" : "🎙️ Tap mic to answer"}
                 </p>
-                <p className="text-slate-400 text-sm mt-1">
-                  Question {step} of {VOICE_QUESTIONS.length}
-                </p>
+                <p className="text-slate-400 text-sm mt-1">Question {step} of {TOTAL_QUESTIONS}</p>
                 <style>{`
-                  @keyframes voiceBar {
-                    0%, 100% { height: 8px; }
-                    50% { height: 28px; }
-                  }
+                  @keyframes voiceBar { 0%, 100% { height: 8px; } 50% { height: 28px; } }
+                  @keyframes coachPop { 0% { opacity: 0; transform: translateY(8px) scale(0.96); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
                 `}</style>
               </div>
             </div>
 
-            {/* Right: fills the empty space with tips + what's next */}
             <div className="flex flex-col gap-4">
               <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -848,9 +1056,9 @@ function App() {
                   <Volume2 className="w-4 h-4 text-slate-400" />
                   <h3 className="text-sm font-bold text-slate-900">Live Skills Detected</h3>
                 </div>
-                {skills.length > 0 ? (
+                {liveSkills.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    {skills.slice(0, 8).map((s, i) => (
+                    {liveSkills.slice(0, 8).map((s, i) => (
                       <span key={i} className="text-xs bg-purple-50 text-purple-700 px-2.5 py-1 rounded-lg border border-purple-100">
                         ✓ {s}
                       </span>
@@ -861,40 +1069,6 @@ function App() {
                 )}
               </div>
             </div>
-
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (showExtraQuestions && !profile) {
-    const curr = EXTRA_QUESTIONS[extraStep];
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50/50 flex items-center justify-center p-6">
-        <div className="bg-white rounded-2xl p-8 max-w-md w-full border border-slate-200/60 shadow-sm">
-          <div className="flex items-center gap-2 mb-6">
-            <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-            <h2 className="text-xl font-bold text-slate-900">Quick Questions</h2>
-            <span className="ml-auto text-xs text-slate-400 font-medium">Question {extraStep + 1} of {EXTRA_QUESTIONS.length}</span>
-          </div>
-          <p className="text-slate-700 text-lg font-medium mb-6">{curr.question}</p>
-          {curr.type === "select" ? (
-            <div className="flex flex-col gap-3">
-              {curr.options.map(opt => (
-                <button key={opt} onClick={() => handleExtraAnswer(opt)} className="bg-slate-50 hover:bg-purple-50 border border-slate-200 hover:border-purple-200 text-slate-700 hover:text-purple-700 py-3 rounded-xl font-medium transition">
-                  {opt}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <input type="text" placeholder="Type your answer..." className="w-full p-3 rounded-xl bg-slate-50 text-slate-800 border border-slate-200 focus:outline-none focus:border-purple-400 transition placeholder:text-slate-400" onKeyPress={e => { if (e.key === 'Enter' && e.target.value.trim()) { handleExtraAnswer(e.target.value.trim()); e.target.value = ''; } }} />
-          )}
-          <div className="mt-6 flex justify-between items-center">
-            <div className="w-full bg-slate-200 rounded-full h-1.5 max-w-[60%]">
-              <div className="bg-purple-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${((extraStep + 1) / EXTRA_QUESTIONS.length) * 100}%` }} />
-            </div>
-            <p className="text-slate-400 text-sm ml-4">{extraStep + 1}/{EXTRA_QUESTIONS.length}</p>
           </div>
         </div>
       </div>
@@ -903,34 +1077,28 @@ function App() {
 
   if (currentPage === 'profile') {
     return (
-      <ProfilePage 
-        profile={profile} 
-        skills={skills} 
-        user={user} 
+      <ProfilePage
+        profile={profile}
+        skills={skills}
+        user={user}
         userPoints={userPoints}
         userRank={userRank}
         userLevel={userLevel}
-        onRetakeInterview={() => { 
-          setProfile(null); 
-          setShowLanding(false); 
-          setStep(0); 
-          handleInitialSpeak(); 
-        }} 
+        onRetakeInterview={() => {
+          setProfile(null);
+          setShowLanding(false);
+          setStep(0);
+          handleInitialSpeak();
+        }}
       />
     );
   }
-// ========== MAIN APP ==========
+
   return (
     <div className={`min-h-screen ${currentPage === 'home' ? 'bg-slate-50' : 'bg-gradient-to-br from-purple-950 to-purple-900'}`}>
-      {/* Enhanced Wow-Factor Navigation Bar */}
       <nav className="sticky top-0 z-50 bg-purple-950/80 backdrop-blur-xl border-b border-purple-500/20 shadow-xl shadow-purple-950/20 px-4 lg:px-8 py-3.5 transition-all">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          
-          {/* Logo Section */}
-          <div 
-            onClick={() => setCurrentPage('home')}
-            className="flex items-center gap-3 cursor-pointer group"
-          >
+          <div onClick={() => setCurrentPage('home')} className="flex items-center gap-3 cursor-pointer group">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-yellow-400 to-amber-300 flex items-center justify-center shadow-md shadow-yellow-500/20 group-hover:scale-105 transition-transform duration-300">
               <span className="text-xl">🎤</span>
             </div>
@@ -942,90 +1110,47 @@ function App() {
             </div>
           </div>
 
-          {/* Center Navigation Links */}
           <div className="hidden xl:flex items-center gap-1 bg-purple-900/40 p-1.5 rounded-2xl border border-purple-700/30 backdrop-blur-md shadow-inner">
-            <button 
-              onClick={() => setCurrentPage('home')} 
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
-                currentPage === 'home' 
-                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
-                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
-              }`}
-            >
+            <button onClick={() => setCurrentPage('home')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${currentPage === 'home' ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' : 'text-purple-200 hover:text-white hover:bg-purple-800/50'}`}>
               <span>🏠</span> Home
             </button>
-            <button 
-              onClick={() => setCurrentPage('dashboard')} 
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
-                currentPage === 'dashboard' 
-                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
-                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
-              }`}
-            >
+            <button onClick={() => setCurrentPage('dashboard')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${currentPage === 'dashboard' ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' : 'text-purple-200 hover:text-white hover:bg-purple-800/50'}`}>
               <span>📋</span> Dashboard
             </button>
-            <button 
-              onClick={() => setCurrentPage('activity')} 
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
-                currentPage === 'activity' 
-                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
-                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
-              }`}
-            >
+            <button onClick={() => setCurrentPage('activity')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${currentPage === 'activity' ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' : 'text-purple-200 hover:text-white hover:bg-purple-800/50'}`}>
               <span>⚡</span> Activity
             </button>
-            <button 
-              onClick={() => setCurrentPage('saved')} 
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
-                currentPage === 'saved' 
-                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
-                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
-              }`}
-            >
+            <button onClick={() => setCurrentPage('saved')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${currentPage === 'saved' ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' : 'text-purple-200 hover:text-white hover:bg-purple-800/50'}`}>
               <span>❤️</span> Saved
             </button>
-            <button 
-              onClick={() => setCurrentPage('profile')} 
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${
-                currentPage === 'profile' 
-                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' 
-                  : 'text-purple-200 hover:text-white hover:bg-purple-800/50'
-              }`}
-            >
+            <button onClick={() => setCurrentPage('profile')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center gap-2 ${currentPage === 'profile' ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-purple-950 shadow-md shadow-yellow-400/20' : 'text-purple-200 hover:text-white hover:bg-purple-800/50'}`}>
               <span>👤</span> Profile
             </button>
           </div>
 
-          {/* Action Hub & Profile Dropdown */}
           <div className="flex items-center gap-2.5">
-            
-            {/* Action Buttons */}
             <div className="hidden md:flex items-center gap-2">
-              <button 
-                onClick={openSkillExtractor} 
-                className="bg-purple-800/60 hover:bg-purple-700/80 text-purple-100 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold border border-purple-600/40 transition-all duration-200 flex items-center gap-1.5 shadow-xs"
-              >
+              <button onClick={openSkillExtractor} className="bg-purple-800/60 hover:bg-purple-700/80 text-purple-100 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold border border-purple-600/40 transition-all duration-200 flex items-center gap-1.5 shadow-xs">
                 <span>🧠</span> Extract Skills
               </button>
-              <button 
-                onClick={openAdvisor} 
-                className="bg-purple-700/80 hover:bg-purple-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold border border-purple-500/40 transition-all duration-200 flex items-center gap-1.5 shadow-xs"
-              >
+              <button onClick={openAdvisor} className="bg-purple-700/80 hover:bg-purple-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold border border-purple-500/40 transition-all duration-200 flex items-center gap-1.5 shadow-xs">
                 <span>🤖</span> Advisor
               </button>
               <button 
-                onClick={searchWebGigs} 
-                disabled={isAIThinking} 
-                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all duration-200 disabled:opacity-50 flex items-center gap-1.5"
-              >
-                <span>{isAIThinking ? '⏳' : '🌐'}</span> {isAIThinking ? 'Searching...' : 'Find Internships'}
-              </button>
+  onClick={searchWebGigs} 
+  disabled={isAIThinking} 
+  className="relative bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-extrabold shadow-lg shadow-blue-600/30 transition-all duration-200 disabled:opacity-50 flex items-center gap-1.5 ring-2 ring-blue-300/60 hover:scale-105"
+>
+  {!isAIThinking && (
+    <span className="absolute -top-1 -right-1 flex h-3 w-3">
+      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+      <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+    </span>
+  )}
+  <span>{isAIThinking ? '⏳' : '🔎'}</span> {isAIThinking ? 'Searching...' : 'Search Live Internships'}
+</button>
             </div>
-
-            {/* Divider */}
             <div className="h-6 w-[1px] bg-purple-700/50 hidden md:block"></div>
-
-            {/* Logout Button */}
             <button
               onClick={async () => { await supabase.auth.signOut(); }}
               className="bg-red-500/10 hover:bg-red-500/20 text-red-300 hover:text-red-200 px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/20 transition-all duration-200 flex items-center gap-1.5"
@@ -1034,10 +1159,8 @@ function App() {
               <span>🚪</span> <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
-
         </div>
 
-        {/* Mobile Sub-Navigation Bar Drawer Indicator */}
         <div className="flex xl:hidden items-center justify-start gap-1.5 overflow-x-auto mt-3 pt-2.5 border-t border-purple-800/50 no-scrollbar">
           <button onClick={() => setCurrentPage('home')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'home' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>🏠 Home</button>
           <button onClick={() => setCurrentPage('dashboard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'dashboard' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>📋 Dashboard</button>
@@ -1046,13 +1169,13 @@ function App() {
           <button onClick={() => setCurrentPage('profile')} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${currentPage === 'profile' ? 'bg-yellow-400 text-purple-950' : 'text-purple-200 bg-purple-900/50'}`}>👤 Profile</button>
           <button onClick={openSkillExtractor} className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap bg-purple-800 text-purple-100">🧠 Skills</button>
           <button onClick={openAdvisor} className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap bg-purple-700 text-white">🤖 Advisor</button>
-          <button onClick={searchWebGigs} disabled={isAIThinking} className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap bg-blue-600 text-white">🌐 Find Internships</button>
+          <button onClick={searchWebGigs} disabled={isAIThinking} className="px-3 py-1.5 rounded-lg text-xs font-extrabold whitespace-nowrap bg-gradient-to-r from-blue-600 to-indigo-600 text-white ring-2 ring-blue-300/60">🔎 Search Live</button>
         </div>
       </nav>
 
       <div className="container mx-auto p-6">
         {currentPage === 'home' && (
-          <HomePage 
+          <HomePage
             user={user}
             profile={profile}
             skills={skills}
@@ -1098,7 +1221,6 @@ function App() {
                 <p className="text-slate-500 text-sm">Internships you've saved for later</p>
               </div>
             </div>
-            
             {getSavedGigsData().length === 0 ? (
               <div className="bg-white rounded-2xl p-12 text-center border border-slate-200/60">
                 <Heart className="w-12 h-12 text-slate-300 mx-auto mb-4" />
@@ -1111,7 +1233,6 @@ function App() {
                   const isApplied = appliedGigs.includes(gig.id);
                   const isPrepped = completedInterviewGigIds.has(gig.id);
                   const companyInitial = gig.company?.charAt(0) || '?';
-                  
                   return (
                     <div key={gig.id} className="bg-white rounded-2xl p-6 border border-yellow-200 shadow-sm hover:shadow-md transition">
                       <div className="flex items-start justify-between mb-4">
@@ -1126,25 +1247,15 @@ function App() {
                         </div>
                         <button onClick={() => toggleSave(gig.id)} className="text-2xl text-red-500">❤️</button>
                       </div>
-                      
                       <p className="text-purple-600 font-semibold text-sm mb-3">{gig.stipend}</p>
-                      
                       <div className="flex flex-wrap gap-2 mb-4">
                         <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-lg">{gig.duration}</span>
-                        <span className={`text-xs px-2 py-1 rounded-lg ${
-                          gig.difficulty === 'Beginner' ? 'bg-green-100 text-green-700' :
-                          gig.difficulty === 'Intermediate' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
+                        <span className={`text-xs px-2 py-1 rounded-lg ${gig.difficulty === 'Beginner' ? 'bg-green-100 text-green-700' : gig.difficulty === 'Intermediate' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
                           {gig.difficulty}
                         </span>
                       </div>
-                      
                       <div className="flex gap-2 mb-2">
-                        <button
-                          onClick={() => setPendingInterviewGig(gig)}
-                          className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl text-sm font-medium transition flex items-center justify-center gap-1.5"
-                        >
+                        <button onClick={() => setPendingInterviewGig(gig)} className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl text-sm font-medium transition flex items-center justify-center gap-1.5">
                           <Sparkles className="w-3.5 h-3.5" />
                           {isPrepped ? 'Retake Mock Interview' : 'Mock Interview'}
                         </button>
@@ -1152,16 +1263,12 @@ function App() {
                           Details
                         </button>
                       </div>
-
                       {isApplied ? (
                         <div className="w-full bg-green-100 text-green-700 py-2.5 rounded-xl text-sm font-semibold text-center flex items-center justify-center gap-2">
                           <CheckCircle className="w-4 h-4" /> Applied
                         </div>
                       ) : (
-                        <button
-                          onClick={() => handleApplyNow(gig)}
-                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-sm font-medium transition flex items-center justify-center gap-1.5"
-                        >
+                        <button onClick={() => handleApplyNow(gig)} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-sm font-medium transition flex items-center justify-center gap-1.5">
                           {isPrepped ? null : <Lock className="w-3.5 h-3.5" />}
                           Apply Now
                         </button>
@@ -1175,16 +1282,9 @@ function App() {
         )}
       </div>
 
-      {/* Soft-gate modal */}
       {applyGateGig && (
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={() => setApplyGateGig(null)}
-        >
-          <div
-            className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl border border-slate-200/60"
-            onClick={e => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setApplyGateGig(null)}>
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl border border-slate-200/60" onClick={e => e.stopPropagation()}>
             <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-4">
               <Sparkles className="w-6 h-6 text-purple-600" />
             </div>
@@ -1217,29 +1317,18 @@ function App() {
         </div>
       )}
 
-      {/* Details modal */}
       {selectedGigForModal && (
-        <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" 
-          onClick={() => setSelectedGigForModal(null)}
-        >
-          <div 
-            className="bg-white rounded-2xl p-8 max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl border border-slate-200/60" 
-            onClick={e => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setSelectedGigForModal(null)}>
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl border border-slate-200/60" onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="text-2xl font-bold text-slate-900">{selectedGigForModal.title}</h3>
                 <p className="text-slate-500 text-sm">{selectedGigForModal.company}</p>
               </div>
-              <button 
-                onClick={() => setSelectedGigForModal(null)} 
-                className="text-slate-400 hover:text-slate-600 transition p-1"
-              >
+              <button onClick={() => setSelectedGigForModal(null)} className="text-slate-400 hover:text-slate-600 transition p-1">
                 <X className="w-5 h-5" />
               </button>
             </div>
-
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div className="bg-slate-50 rounded-xl p-3">
                 <p className="text-xs text-slate-400 uppercase tracking-wide">💰 Stipend</p>
@@ -1258,7 +1347,6 @@ function App() {
                 <p className="text-slate-800 font-medium text-sm">{selectedGigForModal.difficulty}</p>
               </div>
             </div>
-
             {selectedGigForModal.skills && selectedGigForModal.skills.length > 0 && (
               <div className="mb-4">
                 <p className="text-xs text-slate-400 uppercase tracking-wide mb-2">🛠️ Required Skills</p>
@@ -1271,14 +1359,12 @@ function App() {
                 </div>
               </div>
             )}
-
             {selectedGigForModal.description && (
               <div className="mb-4">
                 <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">📝 Description</p>
                 <p className="text-slate-600 text-sm">{selectedGigForModal.description}</p>
               </div>
             )}
-
             {profile && (
               <div className="bg-purple-50 rounded-xl p-4 mb-4 border border-purple-200/30">
                 <div className="flex items-center justify-between">
@@ -1294,11 +1380,7 @@ function App() {
                 </div>
               </div>
             )}
-
-            <button 
-              onClick={() => setSelectedGigForModal(null)} 
-              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-medium transition"
-            >
+            <button onClick={() => setSelectedGigForModal(null)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-medium transition">
               Close
             </button>
           </div>
@@ -1306,17 +1388,8 @@ function App() {
       )}
     </div>
   );
-};
-  // Floating Internship Advisor shortcut — visible on every page, including
-  // the landing page, except while the Advisor itself is open or a mock
-  // interview is actively in progress. Opens the EXISTING InternshipAdvisor
-  // component full-screen via showDeepScan — this is a shortcut, not a
-  // second chat implementation, so the Advisor section itself is untouched.
-  //
-  // Uses closeAllOverlays() so it's guaranteed to close the Skill Profile
-  // page (or any other overlay) even if one was already open underneath —
-  // this is what fixes the "chat button doesn't open Advisor until I click
-  // Back on Skill Profile first" bug.
+  };
+
   const openAdvisor = () => {
     setShowLanding(false);
     closeAllOverlays();

@@ -468,7 +468,26 @@ export const callGroq = async (messages, maxTokens = 900, temperature = 0.5) => 
     return null;
   }
 };
+// ============================================================
+// 9. ADAPTIVE FOLLOW-UP QUESTION — used by the voice interview to
+//    dig deeper into what the student just said, instead of asking
+//    a fixed, generic next question. Returns null on any failure so
+//    the caller can fall back to a fixed question and never get stuck.
+// ============================================================
+export const generateFollowUpQuestion = async (previousAnswer, questionNumber) => {
+  const content = await callGroq([
+    {
+      role: 'system',
+      content: `You are interviewing a student for an internship-matching platform. Based on their last answer, ask ONE short, natural follow-up question (under 20 words) that digs into what they just said — a challenge they faced, a technical detail, or how they solved something. This is question ${questionNumber} of 3 overall. Return ONLY the question text — no quotes, no numbering.`
+    },
+    { role: 'user', content: previousAnswer }
+  ], 60, 0.6);
 
+  if (content && content.trim().length > 3) {
+    return content.replace(/^["']|["']$/g, '').trim();
+  }
+  return null;
+};
 // ============================================================
 // 8. ROLE-SPECIFIC MCQ INTERVIEW — generates 5 multiple-choice
 //    questions based on the ACTUAL gig the student applied to (real

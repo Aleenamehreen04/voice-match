@@ -388,19 +388,24 @@ export default function HomePage({
         {/* LIVE MATCHED INTERNSHIPS GRID */}
         {profile && displayGigs && displayGigs.length > 0 && !isAIThinking && (
           <div className="mt-12">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className={`${FONT_DISPLAY} text-2xl font-bold text-slate-900 flex items-center gap-2.5`}>
-                  <Target className="w-6 h-6 text-purple-700" /> Matched Live Internships
-                </h3>
-                <p className="text-sm text-slate-600 mt-1">Curated in real-time from web search based on your voice skill profile</p>
-              </div>
-              {gigsSource && gigsSourceBanner && (
-                <div className={`px-4 py-2 rounded-2xl text-white text-xs font-bold shadow-md ${gigsSourceBanner[gigsSource]?.color || 'bg-purple-600'}`}>
-                  {gigsSourceBanner[gigsSource]?.text}
-                </div>
-              )}
-            </div>
+           <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+  <div>
+    <h3 className={`${FONT_DISPLAY} text-2xl font-bold text-slate-900 flex items-center gap-2.5`}>
+      <Target className="w-6 h-6 text-purple-700" />
+      {gigsSource === 'ai' ? 'Live Internships' : 'Matched Internships'}
+    </h3>
+    <p className="text-sm text-slate-600 mt-1">
+      {gigsSource === 'ai'
+        ? 'Fetched live just now from the web, based on your voice skill profile'
+        : 'These are preloaded sample internships from our database. Click "Search Live Internships" above to fetch current listings from the web.'}
+    </p>
+  </div>
+  <div className={`px-4 py-2 rounded-2xl text-white text-xs font-bold shadow-md ${
+    gigsSource && gigsSourceBanner ? (gigsSourceBanner[gigsSource]?.color || 'bg-purple-600') : 'bg-slate-500'
+  }`}>
+    {gigsSource && gigsSourceBanner ? gigsSourceBanner[gigsSource]?.text : '📦 Sample Internships — Preloaded Demo Data'}
+  </div>
+</div>
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {displayGigs.map((gig) => {
