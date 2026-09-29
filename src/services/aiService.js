@@ -103,7 +103,7 @@ const safeParseJSON = (text) => {
 // 1. EXTRACT SKILLS
 // ============================================================
 export const extractSkillsWithAI = async (transcript) => {
-  const content = await callWithFallback([
+ const content = await callGroq([
     { role: 'system', content: 'Extract skills. Return ONLY JSON: {"skills":["skill1","skill2"],"category":"Category"}' },
     { role: 'user', content: transcript }
   ], 150, 0.3);
@@ -255,7 +255,7 @@ export const searchInternshipsWithAI = async (skills = [], category = '') => {
 // 3. DEEP CAREER ANALYSIS
 // ============================================================
 export const deepScanSkills = async (transcript) => {
-  const content = await callWithFallback([
+ const content = await callGroq([
     {
       role: 'system',
       content: 'Return ONLY JSON: {"skills":[],"category":"","suggestedRoles":[],"learningResources":[],"careerAdvice":""}'
