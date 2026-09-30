@@ -64,7 +64,11 @@ function Auth({ onLogin }) {
           </button>
         </form>
 
-        <p className="text-slate-500 text-center text-sm mt-6">
+        <p className="text-slate-400 text-center text-xs mt-4">
+          Demo mode — feel free to sign up with any email to explore VoiceMatch yourself.
+        </p>
+
+        <p className="text-slate-500 text-center text-sm mt-4">
           {isSignUp ? 'Already have an account?' : "Don't have an account?"}
           <button
             onClick={() => setIsSignUp(!isSignUp)}

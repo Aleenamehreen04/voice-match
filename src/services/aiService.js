@@ -226,7 +226,7 @@ export const searchInternshipsWithAI = async (skills = [], category = '') => {
     // own server proxy instead of serpapi.com directly — same pattern
     // as the Ollama routes in server/index.js.
     const response = await fetch(
-      `http://localhost:5000/api/serpapi-jobs?q=${encodeURIComponent(searchQuery)}`
+      `https://voicematch-backend-47ex.onrender.com/api/serpapi-jobs?q=${encodeURIComponent(searchQuery)}`
     );
 
     if (!response.ok) {
