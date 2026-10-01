@@ -24,8 +24,9 @@ function StudentDashboard({ user, onStartInterview }) {
   });
 
   useEffect(() => {
-    fetchApplications();
-  }, [user]);
+  fetchApplications();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [user]);
 
   const fetchApplications = async () => {
     if (!user?.email) return;

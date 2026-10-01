@@ -1084,6 +1084,7 @@ function App() {
         userPoints={userPoints}
         userRank={userRank}
         userLevel={userLevel}
+        onBack={() => setCurrentPage('home')}
         onRetakeInterview={() => {
           setProfile(null);
           setShowLanding(false);
