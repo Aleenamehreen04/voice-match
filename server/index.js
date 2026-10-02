@@ -9,10 +9,12 @@ const PORT = process.env.PORT || 5000;
 
 // CORS - allow React app to call this server
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: [
+    'http://localhost:3000',
+    'https://voice-match-xekh-41o3byi3w-aleena23.vercel.app'
+  ],
   credentials: true
 }));
-app.use(express.json());
 
 // ===== OLLAMA PROXY ROUTES =====
 // Ollama's cloud API blocks direct calls from a browser (CORS). This
