@@ -1,7 +1,7 @@
 # 🎤 VoiceMatch
 #DEPLOYED LINK https://voice-match-xekh-2pjbrvm4j-aleena23.vercel.app/
    
-   **Your Voice is Your Resume.**
+    **Your Voice is Your Resume.**
 
 VoiceMatch is a voice-first internship matching platform built for freshers. Instead of filling out forms, students speak about their skills, projects, and interests — an AI extracts real, verifiable signals from what they said, matches them to **live internship listings** pulled from the web, and gives them a data-backed report on how they came across, before they ever apply.
 
