@@ -373,7 +373,7 @@ export const generateInterviewQuestion = async (gig, qaHistory, questionNumber) 
     .map(qa => `Q: ${qa.question}\nA: ${qa.answer}`)
     .join('\n\n');
 
-  const content = await callWithFallback([
+  const content = await callGroq([
     {
       role: 'system',
       content: `You are an interviewer for the "${gig?.title || 'internship'}" role at ${gig?.company || 'a company'}. Required skills: ${gig?.skills?.join(', ') || 'general'}. Ask ONE short, natural interview question (under 30 words). This is question ${questionNumber} of 5. Do not repeat earlier questions. Return ONLY the question text, no JSON, no quotes, no numbering.`
