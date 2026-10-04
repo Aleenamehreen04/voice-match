@@ -7,14 +7,21 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS - allow React app to call this server
+// CORS - allow the local React app during development AND any Vercel
+// deployment of this project. Vercel gives each deploy a new random
+// preview URL (e.g. voice-match-xekh-2lbwthf7n-aleena23.vercel.app), so
+// listing one exact URL breaks on every redeploy. Matching ".vercel.app"
+// instead means this never needs to be touched again for future deploys.
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://voice-match-xekh-41o3byi3w-aleena23.vercel.app'
-  ],
+  origin: function (origin, callback) {
+    if (!origin || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
+app.use(express.json());
 
 // ===== OLLAMA PROXY ROUTES =====
 // Ollama's cloud API blocks direct calls from a browser (CORS). This
