@@ -1,5 +1,4 @@
 # 🎤 VoiceMatch
-#DEPLOYED LINK https://voice-match-xekh-2pjbrvm4j-aleena23.vercel.app/
    
 **Your Voice is Your Resume.**
 
